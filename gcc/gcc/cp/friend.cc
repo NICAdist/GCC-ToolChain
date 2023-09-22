@@ -1,5 +1,5 @@
 /* Help friends in C++.
-   Copyright (C) 1997-2022 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -131,6 +131,8 @@ is_friend (tree type, tree supplicant)
     {
       if (DECL_FUNCTION_MEMBER_P (supplicant))
 	context = DECL_CONTEXT (supplicant);
+      else if (tree fc = DECL_FRIEND_CONTEXT (supplicant))
+	context = fc;
       else
 	context = NULL_TREE;
     }

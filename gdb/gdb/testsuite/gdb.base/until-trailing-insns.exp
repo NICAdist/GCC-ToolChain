@@ -1,4 +1,4 @@
-# Copyright 2022 Free Software Foundation, Inc.
+# Copyright 2022-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -84,16 +84,6 @@ if {![dwarf2_support]} {
     return 0
 }
 
-if [get_compiler_info] {
-    return -1
-}
-
-# The DWARF assembler requires the gcc compiler.
-if {!$gcc_compiled} {
-    unsupported "gcc is required for this test"
-    return 0
-}
-
 standard_testfile .c .S
 
 if { [prepare_for_testing "failed to prepare" ${testfile} ${srcfile}] } {
@@ -135,35 +125,35 @@ Dwarf::assemble $asm_file {
 	# of adding some !is_stmt at the end of a loop line, making until
 	# not work properly.
 	program {
-	    {DW_LNE_set_address $main_start}
-	    {line [gdb_get_line_number "TAG: main prologue"]}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address loop_start}
-	    {line [gdb_get_line_number "TAG: loop line"]}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address loop_condition}
-	    {line [gdb_get_line_number "TAG: loop line"]}
-	    {DW_LNS_negate_stmt}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address loop_code}
-	    {line [gdb_get_line_number "TAG: loop code"]}
-	    {DW_LNS_negate_stmt}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address loop_increment}
-	    {line [gdb_get_line_number "TAG: loop line"]}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address loop_jump}
-	    {line [gdb_get_line_number "TAG: loop line"]}
-	    {DW_LNS_negate_stmt}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address main_return}
-	    {line [gdb_get_line_number "TAG: main return"]}
-	    {DW_LNS_negate_stmt}
-	    {DW_LNS_copy}
-	    {DW_LNE_set_address $main_end}
-	    {line [expr [gdb_get_line_number "TAG: main return"] + 1]}
-	    {DW_LNS_copy}
-	    {DW_LNE_end_sequence}
+	    DW_LNE_set_address $main_start
+	    line [gdb_get_line_number "TAG: main prologue"]
+	    DW_LNS_copy
+	    DW_LNE_set_address loop_start
+	    line [gdb_get_line_number "TAG: loop line"]
+	    DW_LNS_copy
+	    DW_LNE_set_address loop_condition
+	    line [gdb_get_line_number "TAG: loop line"]
+	    DW_LNS_negate_stmt
+	    DW_LNS_copy
+	    DW_LNE_set_address loop_code
+	    line [gdb_get_line_number "TAG: loop code"]
+	    DW_LNS_negate_stmt
+	    DW_LNS_copy
+	    DW_LNE_set_address loop_increment
+	    line [gdb_get_line_number "TAG: loop line"]
+	    DW_LNS_copy
+	    DW_LNE_set_address loop_jump
+	    line [gdb_get_line_number "TAG: loop line"]
+	    DW_LNS_negate_stmt
+	    DW_LNS_copy
+	    DW_LNE_set_address main_return
+	    line [gdb_get_line_number "TAG: main return"]
+	    DW_LNS_negate_stmt
+	    DW_LNS_copy
+	    DW_LNE_set_address $main_end
+	    line [expr [gdb_get_line_number "TAG: main return"] + 1]
+	    DW_LNS_copy
+	    DW_LNE_end_sequence
 	}
     }
 

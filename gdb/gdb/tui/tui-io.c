@@ -1,6 +1,6 @@
 /* TUI support I/O functions.
 
-   Copyright (C) 1998-2022 Free Software Foundation, Inc.
+   Copyright (C) 1998-2023 Free Software Foundation, Inc.
 
    Contributed by Hewlett-Packard Company.
 
@@ -44,6 +44,8 @@
 #include "completer.h"
 #include "gdb_curses.h"
 #include <map>
+#include "pager.h"
+#include "gdbsupport/gdb-checked-static-cast.h"
 
 /* This redefines CTRL if it is not already defined, so it must come
    after terminal state releated include files like <term.h> and
@@ -108,11 +110,13 @@ key_is_start_sequence (int ch)
 /* TUI output files.  */
 static struct ui_file *tui_stdout;
 static struct ui_file *tui_stderr;
+static struct ui_file *tui_stdlog;
 struct ui_out *tui_out;
 
 /* GDB output files in non-curses mode.  */
 static struct ui_file *tui_old_stdout;
 static struct ui_file *tui_old_stderr;
+static struct ui_file *tui_old_stdlog;
 cli_ui_out *tui_old_uiout;
 
 /* Readline previous hooks.  */
@@ -365,6 +369,9 @@ apply_ansi_escape (WINDOW *w, const char *buf)
 
   if (reverse_mode_p)
     {
+      if (!style_tui_current_position)
+	return n_read;
+
       /* We want to reverse _only_ the default foreground/background
 	 colors.  If the foreground color is not the default (because
 	 the text was styled), we want to leave it as is.  If e.g.,
@@ -407,18 +414,26 @@ tui_set_reverse_mode (WINDOW *w, bool reverse)
   ui_file_style style = last_style;
 
   reverse_mode_p = reverse;
-  style.set_reverse (reverse);
 
   if (reverse)
     {
       reverse_save_bg = style.get_background ();
       reverse_save_fg = style.get_foreground ();
+
+      if (!style_tui_current_position)
+	{
+	  /* Switch to default style (reversed) while highlighting the
+	     current position.  */
+	  style = {};
+	}
     }
   else
     {
       style.set_bg (reverse_save_bg);
       style.set_fg (reverse_save_fg);
     }
+
+  style.set_reverse (reverse);
 
   tui_apply_style (w, style);
 }
@@ -828,15 +843,15 @@ tui_setup_io (int mode)
       /* Keep track of previous gdb output.  */
       tui_old_stdout = gdb_stdout;
       tui_old_stderr = gdb_stderr;
-      tui_old_uiout = dynamic_cast<cli_ui_out *> (current_uiout);
-      gdb_assert (tui_old_uiout != nullptr);
+      tui_old_stdlog = gdb_stdlog;
+      tui_old_uiout = gdb::checked_static_cast<cli_ui_out *> (current_uiout);
 
       /* Reconfigure gdb output.  */
       gdb_stdout = tui_stdout;
       gdb_stderr = tui_stderr;
-      gdb_stdlog = gdb_stdout;	/* for moment */
-      gdb_stdtarg = gdb_stderr;	/* for moment */
-      gdb_stdtargerr = gdb_stderr;	/* for moment */
+      gdb_stdlog = tui_stdlog;
+      gdb_stdtarg = gdb_stderr;
+      gdb_stdtargerr = gdb_stderr;
       current_uiout = tui_out;
 
       /* Save tty for SIGCONT.  */
@@ -847,9 +862,9 @@ tui_setup_io (int mode)
       /* Restore gdb output.  */
       gdb_stdout = tui_old_stdout;
       gdb_stderr = tui_old_stderr;
-      gdb_stdlog = gdb_stdout;	/* for moment */
-      gdb_stdtarg = gdb_stderr;	/* for moment */
-      gdb_stdtargerr = gdb_stderr;	/* for moment */
+      gdb_stdlog = tui_old_stdlog;
+      gdb_stdtarg = gdb_stderr;
+      gdb_stdtargerr = gdb_stderr;
       current_uiout = tui_old_uiout;
 
       /* Restore readline.  */
@@ -900,12 +915,13 @@ tui_initialize_io (void)
 #endif
 
   /* Create tui output streams.  */
-  tui_stdout = new tui_file (stdout);
-  tui_stderr = new tui_file (stderr);
-  tui_out = tui_out_new (tui_stdout);
+  tui_stdout = new pager_file (new tui_file (stdout, true));
+  tui_stderr = new tui_file (stderr, false);
+  tui_stdlog = new timestamped_file (tui_stderr);
+  tui_out = new tui_ui_out (tui_stdout);
 
   /* Create the default UI.  */
-  tui_old_uiout = cli_out_new (gdb_stdout);
+  tui_old_uiout = new cli_ui_out (gdb_stdout);
 
 #ifdef TUI_USE_PIPE_FOR_READLINE
   /* Temporary solution for readline writing to stdout: redirect

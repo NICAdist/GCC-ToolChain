@@ -1,4 +1,4 @@
-# Copyright (C) 2010-2022 Free Software Foundation, Inc.
+# Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
 # Makefile for building a staged copy of the data-directory.
 # This file is part of GDB.
@@ -69,6 +69,7 @@ PYTHON_DIR = python
 PYTHON_INSTALL_DIR = $(DESTDIR)$(GDB_DATADIR)/$(PYTHON_DIR)
 PYTHON_FILE_LIST = \
 	gdb/__init__.py \
+	gdb/disassembler.py \
 	gdb/FrameDecorator.py \
 	gdb/FrameIterator.py \
 	gdb/frames.py \

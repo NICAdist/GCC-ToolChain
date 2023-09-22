@@ -1,6 +1,6 @@
 /* DWARF 2 debugging format support for GDB.
 
-   Copyright (C) 1994-2022 Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -24,6 +24,7 @@
 #include "dwarf2/read.h"
 #include "complaints.h"
 #include "filenames.h"
+#include "gdbsupport/pathstuff.h"
 
 void
 line_header::add_include_dir (const char *include_dir)
@@ -35,8 +36,8 @@ line_header::add_include_dir (const char *include_dir)
 	new_size = m_include_dirs.size ();
       else
 	new_size = m_include_dirs.size () + 1;
-      fprintf_unfiltered (gdb_stdlog, "Adding dir %zu: %s\n",
-			  new_size, include_dir);
+      gdb_printf (gdb_stdlog, "Adding dir %zu: %s\n",
+		  new_size, include_dir);
     }
   m_include_dirs.push_back (include_dir);
 }
@@ -47,53 +48,36 @@ line_header::add_file_name (const char *name,
 			    unsigned int mod_time,
 			    unsigned int length)
 {
+  file_name_index index
+    = version >= 5 ? file_names_size (): file_names_size () + 1;
+
   if (dwarf_line_debug >= 2)
-    {
-      size_t new_size;
-      if (version >= 5)
-	new_size = file_names_size ();
-      else
-	new_size = file_names_size () + 1;
-      fprintf_unfiltered (gdb_stdlog, "Adding file %zu: %s\n",
-			  new_size, name);
-    }
-  m_file_names.emplace_back (name, d_index, mod_time, length);
+    gdb_printf (gdb_stdlog, "Adding file %d: %s\n", index, name);
+
+  m_file_names.emplace_back (name, index, d_index, mod_time, length);
 }
 
-gdb::unique_xmalloc_ptr<char>
-line_header::file_file_name (int file) const
+std::string
+line_header::file_file_name (const file_entry &fe) const
 {
-  /* Is the file number a valid index into the line header's file name
-     table?  Remember that file numbers start with one, not zero.  */
-  if (is_valid_file_index (file))
-    {
-      const file_entry *fe = file_name_at (file);
+  gdb_assert (is_valid_file_index (fe.index));
 
-      if (!IS_ABSOLUTE_PATH (fe->name))
-	{
-	  const char *dir = fe->include_dir (this);
-	  if (dir != NULL)
-	    return gdb::unique_xmalloc_ptr<char> (concat (dir, SLASH_STRING,
-							  fe->name,
-							  (char *) NULL));
-	}
-      return make_unique_xstrdup (fe->name);
-    }
-  else
-    {
-      /* The compiler produced a bogus file number.  We can at least
-	 record the macro definitions made in the file, even if we
-	 won't be able to find the file by name.  */
-      char fake_name[80];
+  std::string ret = fe.name;
 
-      xsnprintf (fake_name, sizeof (fake_name),
-		 "<bad macro file number %d>", file);
+  if (IS_ABSOLUTE_PATH (ret))
+    return ret;
 
-      complaint (_("bad file number in macro information (%d)"),
-		 file);
+  const char *dir = fe.include_dir (this);
+  if (dir != nullptr)
+    ret = path_join (dir, ret.c_str ());
 
-      return make_unique_xstrdup (fake_name);
-    }
+  if (IS_ABSOLUTE_PATH (ret))
+    return ret;
+
+  if (m_comp_dir != nullptr)
+    ret = path_join (m_comp_dir, ret.c_str ());
+
+  return ret;
 }
 
 static void
@@ -231,6 +215,10 @@ read_formatted_entries (dwarf2_per_objfile *per_objfile, bfd *abfd,
 	      break;
 	    }
 
+	  /* Normalize nullptr string.  */
+	  if (string.has_value () && *string == nullptr)
+	    string.emplace ("");
+
 	  switch (content_type)
 	    {
 	    case DW_LNCT_path:
@@ -269,7 +257,8 @@ line_header_up
 dwarf_decode_line_header  (sect_offset sect_off, bool is_dwz,
 			   dwarf2_per_objfile *per_objfile,
 			   struct dwarf2_section_info *section,
-			   const struct comp_unit_head *cu_header)
+			   const struct comp_unit_head *cu_header,
+			   const char *comp_dir)
 {
   const gdb_byte *line_ptr;
   unsigned int bytes_read, offset_size;
@@ -286,7 +275,7 @@ dwarf_decode_line_header  (sect_offset sect_off, bool is_dwz,
       return 0;
     }
 
-  line_header_up lh (new line_header ());
+  line_header_up lh (new line_header (comp_dir));
 
   lh->sect_off = sect_off;
   lh->offset_in_dwz = is_dwz;
@@ -294,19 +283,19 @@ dwarf_decode_line_header  (sect_offset sect_off, bool is_dwz,
   line_ptr = section->buffer + to_underlying (sect_off);
 
   /* Read in the header.  */
-  lh->total_length =
-    read_checked_initial_length_and_offset (abfd, line_ptr, cu_header,
-					    &bytes_read, &offset_size);
+  LONGEST unit_length
+    = read_checked_initial_length_and_offset (abfd, line_ptr, cu_header,
+					      &bytes_read, &offset_size);
   line_ptr += bytes_read;
 
   const gdb_byte *start_here = line_ptr;
 
-  if (line_ptr + lh->total_length > (section->buffer + section->size))
+  if (line_ptr + unit_length > (section->buffer + section->size))
     {
       dwarf2_statement_list_fits_in_line_number_section_complaint ();
       return 0;
     }
-  lh->statement_program_end = start_here + lh->total_length;
+  lh->statement_program_end = start_here + unit_length;
   lh->version = read_2_bytes (abfd, line_ptr);
   line_ptr += 2;
   if (lh->version > 5)
@@ -334,11 +323,13 @@ dwarf_decode_line_header  (sect_offset sect_off, bool is_dwz,
 	  return NULL;
 	}
     }
-  lh->header_length = read_offset (abfd, line_ptr, offset_size);
+
+  LONGEST header_length = read_offset (abfd, line_ptr, offset_size);
   line_ptr += offset_size;
-  lh->statement_program_start = line_ptr + lh->header_length;
+  lh->statement_program_start = line_ptr + header_length;
   lh->minimum_instruction_length = read_1_byte (abfd, line_ptr);
   line_ptr += 1;
+
   if (lh->version >= 4)
     {
       lh->maximum_ops_per_instruction = read_1_byte (abfd, line_ptr);

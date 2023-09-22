@@ -1,6 +1,6 @@
 /* Definitions for expressions stored in reversed prefix form, for GDB.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -208,6 +208,12 @@ struct expression
     return op->opcode ();
   }
 
+  /* Dump the expression to STREAM.  */
+  void dump (struct ui_file *stream)
+  {
+    op->dump (stream, 0);
+  }
+
   /* Evaluate the expression.  EXPECT_TYPE is the context type of the
      expression; normally this should be nullptr.  NOSIDE controls how
      evaluation is performed.  */
@@ -232,8 +238,26 @@ extern expression_up parse_expression (const char *,
 extern expression_up parse_expression_with_language (const char *string,
 						     enum language lang);
 
-extern struct type *parse_expression_for_completion
-    (const char *, gdb::unique_xmalloc_ptr<char> *, enum type_code *);
+
+class completion_tracker;
+
+/* Base class for expression completion.  An instance of this
+   represents a completion request from the parser.  */
+struct expr_completion_base
+{
+  /* Perform this object's completion.  EXP is the expression in which
+     the completion occurs.  TRACKER is the tracker to update with the
+     results.  Return true if completion was possible (even if no
+     completions were found), false to fall back to ordinary
+     expression completion (i.e., symbol names).  */
+  virtual bool complete (struct expression *exp,
+			 completion_tracker &tracker) = 0;
+
+  virtual ~expr_completion_base () = default;
+};
+
+extern expression_up parse_expression_for_completion
+     (const char *, std::unique_ptr<expr_completion_base> *completer);
 
 class innermost_block_tracker;
 extern expression_up parse_exp_1 (const char **, CORE_ADDR pc,
@@ -258,8 +282,6 @@ extern struct value *evaluate_subexp_do_call (expression *exp,
 /* From expprint.c */
 
 extern const char *op_name (enum exp_opcode opcode);
-
-extern void dump_prefix_expression (struct expression *, struct ui_file *);
 
 /* In an OP_RANGE expression, either bound could be empty, indicating
    that its value is by default that of the corresponding bound of the

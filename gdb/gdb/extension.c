@@ -1,6 +1,6 @@
 /* Interface between gdb and its extension languages.
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -33,6 +33,7 @@
 #include "python/python.h"
 #include "guile/guile.h"
 #include <array>
+#include "inferior.h"
 
 static script_sourcer_func source_gdb_script;
 static objfile_script_sourcer_func source_gdb_objfile_script;
@@ -524,7 +525,7 @@ apply_ext_lang_val_pretty_printer (struct value *val,
    rather than trying filters in other extension languages.  */
 
 enum ext_lang_bt_status
-apply_ext_lang_frame_filter (struct frame_info *frame,
+apply_ext_lang_frame_filter (frame_info_ptr frame,
 			     frame_filter_flags flags,
 			     enum ext_lang_frame_args args_type,
 			     struct ui_out *out,
@@ -657,11 +658,11 @@ get_active_ext_lang (void)
 /* Install a SIGINT handler.  */
 
 static void
-install_sigint_handler (const struct signal_handler *handler_state)
+install_ext_sigint_handler (const struct signal_handler *handler_state)
 {
   gdb_assert (handler_state->handler_saved);
 
-  signal (SIGINT, handler_state->handler);
+  install_sigint_handler (handler_state->handler);
 }
 
 /* Install GDB's SIGINT handler, storing the previous version in *PREVIOUS.
@@ -675,7 +676,7 @@ install_gdb_sigint_handler (struct signal_handler *previous)
   /* Save here to simplify comparison.  */
   sighandler_t handle_sigint_for_compare = handle_sigint;
 
-  previous->handler = signal (SIGINT, handle_sigint);
+  previous->handler = install_sigint_handler (handle_sigint);
   if (previous->handler != handle_sigint_for_compare)
     previous->handler_saved = 1;
   else
@@ -756,7 +757,7 @@ restore_active_ext_lang (struct active_ext_lang_state *previous)
     {
       /* Restore the previous SIGINT handler if one was saved.  */
       if (previous->sigint_handler.handler_saved)
-	install_sigint_handler (&previous->sigint_handler);
+	install_ext_sigint_handler (&previous->sigint_handler);
 
       /* If there's a SIGINT recorded in the cooperative extension languages,
 	 move it to the new language, or save it in GDB's global flag if the
@@ -922,6 +923,26 @@ ext_lang_colorize_disasm (const std::string &content, gdbarch *gdbarch)
     }
 
   return result;
+}
+
+/* See extension.h.  */
+
+gdb::optional<int>
+ext_lang_print_insn (struct gdbarch *gdbarch, CORE_ADDR address,
+		     struct disassemble_info *info)
+{
+  for (const struct extension_language_defn *extlang : extension_languages)
+    {
+      if (extlang->ops == nullptr
+	  || extlang->ops->print_insn == nullptr)
+	continue;
+      gdb::optional<int> length
+	= extlang->ops->print_insn (gdbarch, address, info);
+      if (length.has_value ())
+	return length;
+    }
+
+  return {};
 }
 
 /* Called via an observer before gdb prints its prompt.

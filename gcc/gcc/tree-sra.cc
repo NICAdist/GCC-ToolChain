@@ -1,7 +1,7 @@
 /* Scalar Replacement of Aggregates (SRA) converts some structure
    references into scalar references, exposing them to the scalar
    optimizers.
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
    Contributed by Martin Jambor <mjambor@suse.cz>
 
 This file is part of GCC.
@@ -4777,8 +4777,11 @@ public:
   {}
 
   /* opt_pass methods: */
-  virtual bool gate (function *) { return gate_intra_sra (); }
-  virtual unsigned int execute (function *) { return early_intra_sra (); }
+  bool gate (function *) final override { return gate_intra_sra (); }
+  unsigned int execute (function *) final override
+  {
+    return early_intra_sra ();
+  }
 
 }; // class pass_sra_early
 
@@ -4813,8 +4816,8 @@ public:
   {}
 
   /* opt_pass methods: */
-  virtual bool gate (function *) { return gate_intra_sra (); }
-  virtual unsigned int execute (function *) { return late_intra_sra (); }
+  bool gate (function *) final override { return gate_intra_sra (); }
+  unsigned int execute (function *) final override { return late_intra_sra (); }
 
 }; // class pass_sra
 

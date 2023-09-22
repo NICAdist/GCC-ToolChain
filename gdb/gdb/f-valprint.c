@@ -1,6 +1,6 @@
 /* Support for printing Fortran values for GDB, the GNU debugger.
 
-   Copyright (C) 1993-2022 Free Software Foundation, Inc.
+   Copyright (C) 1993-2023 Free Software Foundation, Inc.
 
    Contributed by Motorola.  Adapted from the C definitions by Farooq Butt
    (fmbutt@engage.sps.mot.com), additionally worked over by Stan Shebs.
@@ -82,19 +82,17 @@ f77_get_dynamic_length_of_aggregate (struct type *type)
      This function also works for strings which behave very 
      similarly to arrays.  */
 
-  if (TYPE_TARGET_TYPE (type)->code () == TYPE_CODE_ARRAY
-      || TYPE_TARGET_TYPE (type)->code () == TYPE_CODE_STRING)
-    f77_get_dynamic_length_of_aggregate (TYPE_TARGET_TYPE (type));
+  if (type->target_type ()->code () == TYPE_CODE_ARRAY
+      || type->target_type ()->code () == TYPE_CODE_STRING)
+    f77_get_dynamic_length_of_aggregate (type->target_type ());
 
   /* Recursion ends here, start setting up lengths.  */
   lower_bound = f77_get_lowerbound (type);
   upper_bound = f77_get_upperbound (type);
 
   /* Patch in a valid length value.  */
-
-  TYPE_LENGTH (type) =
-    (upper_bound - lower_bound + 1)
-    * TYPE_LENGTH (check_typedef (TYPE_TARGET_TYPE (type)));
+  type->set_length ((upper_bound - lower_bound + 1)
+		    * check_typedef (type->target_type ())->length ());
 }
 
 /* Per-dimension statistics.  */
@@ -144,7 +142,7 @@ public:
   {
     bool cont = should_continue && (m_elts < m_options->print_max);
     if (!cont && should_continue)
-      fputs_filtered ("...", m_stream);
+      gdb_puts ("...", m_stream);
     return cont;
   }
 
@@ -162,7 +160,7 @@ public:
 	m_stats[dim_indx].nelts = nelts;
       }
 
-    fputs_filtered ("(", m_stream);
+    gdb_puts ("(", m_stream);
   }
 
   /* Called when we finish processing a batch of items within a dimension
@@ -171,9 +169,9 @@ public:
      separators between elements, and dimensions of the array.  */
   void finish_dimension (bool inner_p, bool last_p)
   {
-    fputs_filtered (")", m_stream);
+    gdb_puts (")", m_stream);
     if (!last_p)
-      fputs_filtered (" ", m_stream);
+      gdb_puts (" ", m_stream);
 
     m_dimension--;
   }
@@ -212,13 +210,13 @@ public:
 	if (nrepeats >= m_options->repeat_count_threshold)
 	  {
 	    annotate_elt_rep (nrepeats + 1);
-	    fprintf_filtered (m_stream, "%p[<repeats %s times>%p]",
-			      metadata_style.style ().ptr (),
-			      plongest (nrepeats + 1),
-			      nullptr);
+	    gdb_printf (m_stream, "%p[<repeats %s times>%p]",
+			metadata_style.style ().ptr (),
+			plongest (nrepeats + 1),
+			nullptr);
 	    annotate_elt_rep_end ();
 	    if (!repeated)
-	      fputs_filtered (" ", m_stream);
+	      gdb_puts (" ", m_stream);
 	    m_elts += nrepeats * m_stats[dim_indx + 1].nelts;
 	  }
 	else
@@ -245,7 +243,7 @@ public:
 		nrepeats++;
 	      }
 	    else if (last_p)
-	      fputs_filtered ("...", m_stream);
+	      gdb_puts ("...", m_stream);
 	  }
       }
 
@@ -266,7 +264,7 @@ public:
     bool repeated = (m_options->repeat_count_threshold < UINT_MAX
 		     && elt_type_prev != nullptr
 		     && value_contents_eq (m_val, elt_off_prev, m_val, elt_off,
-					   TYPE_LENGTH (elt_type)));
+					   elt_type->length ()));
 
     if (repeated)
       m_nrepeats++;
@@ -281,10 +279,10 @@ public:
 	    if (nrepeats >= m_options->repeat_count_threshold)
 	      {
 		annotate_elt_rep (nrepeats + 1);
-		fprintf_filtered (m_stream, "%p[<repeats %s times>%p]",
-				  metadata_style.style ().ptr (),
-				  plongest (nrepeats + 1),
-				  nullptr);
+		gdb_printf (m_stream, "%p[<repeats %s times>%p]",
+			    metadata_style.style ().ptr (),
+			    plongest (nrepeats + 1),
+			    nullptr);
 		annotate_elt_rep_end ();
 	      }
 	    else
@@ -301,7 +299,7 @@ public:
 		    common_val_print (e_val, m_stream, m_recurse, m_options,
 				      current_language);
 		    if (i > 1)
-		      fputs_filtered (", ", m_stream);
+		      gdb_puts (", ", m_stream);
 		  }
 	      }
 	    printed = true;
@@ -314,14 +312,14 @@ public:
 	      = value_from_component (m_val, elt_type, elt_off);
 
 	    if (printed)
-	      fputs_filtered (", ", m_stream);
+	      gdb_puts (", ", m_stream);
 	    maybe_print_array_index (m_stats[dim_indx].index_type, index,
 				     m_stream, m_options);
 	    common_val_print (e_val, m_stream, m_recurse, m_options,
 			      current_language);
 	  }
 	if (!last_p)
-	  fputs_filtered (", ", m_stream);
+	  gdb_puts (", ", m_stream);
       }
 
     m_elt_type_prev = elt_type;
@@ -339,7 +337,7 @@ private:
 			 LONGEST offset1, LONGEST offset2)
   {
     if (type->code () == TYPE_CODE_ARRAY
-	&& TYPE_TARGET_TYPE (type)->code () != TYPE_CODE_CHAR)
+	&& type->target_type ()->code () != TYPE_CODE_CHAR)
       {
 	/* Extract the range, and get lower and upper bounds.  */
 	struct type *range_type = check_typedef (type)->index_type ();
@@ -350,7 +348,7 @@ private:
 	/* CALC is used to calculate the offsets for each element.  */
 	fortran_array_offset_calculator calc (type);
 
-	struct type *subarray_type = check_typedef (TYPE_TARGET_TYPE (type));
+	struct type *subarray_type = check_typedef (type->target_type ());
 	for (LONGEST i = lowerbound; i < upperbound + 1; i++)
 	  {
 	    /* Use the index and the stride to work out a new offset.  */
@@ -365,7 +363,7 @@ private:
       }
     else
       return value_contents_eq (val, offset1, val, offset2,
-				TYPE_LENGTH (type));
+				type->length ());
   }
 
   /* The number of elements printed so far.  */
@@ -448,19 +446,19 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
     case TYPE_CODE_STRING:
       f77_get_dynamic_length_of_aggregate (type);
       printstr (stream, builtin_type (gdbarch)->builtin_char, valaddr,
-		TYPE_LENGTH (type), NULL, 0, options);
+		type->length (), NULL, 0, options);
       break;
 
     case TYPE_CODE_ARRAY:
-      if (TYPE_TARGET_TYPE (type)->code () != TYPE_CODE_CHAR)
+      if (type->target_type ()->code () != TYPE_CODE_CHAR)
 	fortran_print_array (type, address, stream, recurse, val, options);
       else
 	{
-	  struct type *ch_type = TYPE_TARGET_TYPE (type);
+	  struct type *ch_type = type->target_type ();
 
 	  f77_get_dynamic_length_of_aggregate (type);
 	  printstr (stream, ch_type, valaddr,
-		    TYPE_LENGTH (type) / TYPE_LENGTH (ch_type), NULL, 0,
+		    type->length () / ch_type->length (), NULL, 0,
 		    options);
 	}
       break;
@@ -476,7 +474,7 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
 	  int want_space = 0;
 
 	  addr = unpack_pointer (type, valaddr);
-	  elttype = check_typedef (TYPE_TARGET_TYPE (type));
+	  elttype = check_typedef (type->target_type ());
 
 	  if (elttype->code () == TYPE_CODE_FUNC)
 	    {
@@ -490,20 +488,20 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
 						 stream, demangle);
 	  else if (options->addressprint && options->format != 's')
 	    {
-	      fputs_filtered (paddress (gdbarch, addr), stream);
+	      gdb_puts (paddress (gdbarch, addr), stream);
 	      want_space = 1;
 	    }
 
 	  /* For a pointer to char or unsigned char, also print the string
 	     pointed to, unless pointer is null.  */
-	  if (TYPE_LENGTH (elttype) == 1
+	  if (elttype->length () == 1
 	      && elttype->code () == TYPE_CODE_INT
 	      && (options->format == 0 || options->format == 's')
 	      && addr != 0)
 	    {
 	      if (want_space)
-		fputs_filtered (" ", stream);
-	      val_print_string (TYPE_TARGET_TYPE (type), NULL, addr, -1,
+		gdb_puts (" ", stream);
+	      val_print_string (type->target_type (), NULL, addr, -1,
 				stream, options);
 	    }
 	  return;
@@ -515,7 +513,7 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
     case TYPE_CODE_NAMELIST:
       /* Starting from the Fortran 90 standard, Fortran supports derived
 	 types.  */
-      fprintf_filtered (stream, "( ");
+      gdb_printf (stream, "( ");
       for (index = 0; index < type->num_fields (); index++)
 	{
 	  struct type *field_type
@@ -542,13 +540,13 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
 		field = value_field (val, index);
 
 	      if (printed_field > 0)
-		fputs_filtered (", ", stream);
+		gdb_puts (", ", stream);
 
 	      if (field_name != NULL)
 		{
 		  fputs_styled (field_name, variable_name_style.style (),
 				stream);
-		  fputs_filtered (" = ", stream);
+		  gdb_puts (" = ", stream);
 		}
 
 	      common_val_print (field, stream, recurse + 1,
@@ -557,7 +555,7 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
 	      ++printed_field;
 	    }
 	 }
-      fprintf_filtered (stream, " )");
+      gdb_printf (stream, " )");
       break;     
 
     case TYPE_CODE_BOOL:
@@ -575,9 +573,9 @@ f_language::value_print_inner (struct value *val, struct ui_file *stream,
 	     represented.  Different compilers use different non zero
 	     values to represent logical true.  */
 	  if (longval == 0)
-	    fputs_filtered (f_decorations.false_name, stream);
+	    gdb_puts (f_decorations.false_name, stream);
 	  else
-	    fputs_filtered (f_decorations.true_name, stream);
+	    gdb_puts (f_decorations.true_name, stream);
 	}
       break;
 
@@ -611,7 +609,7 @@ info_common_command_for_block (const struct block *block, const char *comname,
   ALL_BLOCK_SYMBOLS (block, iter, sym)
     if (sym->domain () == COMMON_BLOCK_DOMAIN)
       {
-	const struct common_block *common = SYMBOL_VALUE_COMMON_BLOCK (sym);
+	const struct common_block *common = sym->value_common_block ();
 	size_t index;
 
 	gdb_assert (sym->aclass () == LOC_COMMON_BLOCK);
@@ -621,21 +619,21 @@ info_common_command_for_block (const struct block *block, const char *comname,
 	  continue;
 
 	if (*any_printed)
-	  putchar_filtered ('\n');
+	  gdb_putc ('\n');
 	else
 	  *any_printed = 1;
 	if (sym->print_name ())
-	  printf_filtered (_("Contents of F77 COMMON block '%s':\n"),
-			   sym->print_name ());
+	  gdb_printf (_("Contents of F77 COMMON block '%s':\n"),
+		      sym->print_name ());
 	else
-	  printf_filtered (_("Contents of blank COMMON block:\n"));
+	  gdb_printf (_("Contents of blank COMMON block:\n"));
 	
 	for (index = 0; index < common->n_entries; index++)
 	  {
 	    struct value *val = NULL;
 
-	    printf_filtered ("%s = ",
-			     common->contents[index]->print_name ());
+	    gdb_printf ("%s = ",
+			common->contents[index]->print_name ());
 
 	    try
 	      {
@@ -650,7 +648,7 @@ info_common_command_for_block (const struct block *block, const char *comname,
 				except.what ());
 	      }
 
-	    putchar_filtered ('\n');
+	    gdb_putc ('\n');
 	  }
       }
 }
@@ -662,7 +660,7 @@ info_common_command_for_block (const struct block *block, const char *comname,
 static void
 info_common_command (const char *comname, int from_tty)
 {
-  struct frame_info *fi;
+  frame_info_ptr fi;
   const struct block *block;
   int values_printed = 0;
 
@@ -679,7 +677,7 @@ info_common_command (const char *comname, int from_tty)
   block = get_frame_block (fi, 0);
   if (block == NULL)
     {
-      printf_filtered (_("No symbol table info available.\n"));
+      gdb_printf (_("No symbol table info available.\n"));
       return;
     }
 
@@ -688,17 +686,17 @@ info_common_command (const char *comname, int from_tty)
       info_common_command_for_block (block, comname, &values_printed);
       /* After handling the function's top-level block, stop.  Don't
 	 continue to its superblock, the block of per-file symbols.  */
-      if (BLOCK_FUNCTION (block))
+      if (block->function ())
 	break;
-      block = BLOCK_SUPERBLOCK (block);
+      block = block->superblock ();
     }
 
   if (!values_printed)
     {
       if (comname)
-	printf_filtered (_("No common block '%s'.\n"), comname);
+	gdb_printf (_("No common block '%s'.\n"), comname);
       else
-	printf_filtered (_("No common blocks.\n"));
+	gdb_printf (_("No common blocks.\n"));
     }
 }
 

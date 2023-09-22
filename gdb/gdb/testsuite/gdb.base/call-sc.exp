@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2004-2022 Free Software Foundation, Inc.
+# Copyright 2004-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,17 +24,11 @@
 
 if [target_info exists gdb,cannot_call_functions] {
     unsupported "this target can not call functions"
-    continue
+    return
 }
 
 standard_testfile .c
 
-# Create and source the file that provides information about the
-# compiler used to compile the test case.
-
-if [get_compiler_info] {
-    return -1
-}
 set skip_float_test [gdb_skip_float_test]
 
 # Compile a variant of scalars.c using TYPE to specify the type of the
@@ -67,7 +61,7 @@ proc start_scalars_test { type } {
     }
 
     # Advance to main
-    if { ![runto_main] } then {
+    if {![runto_main]} {
 	return
     }
 

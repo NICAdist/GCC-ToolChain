@@ -1,5 +1,5 @@
 /* Diagnostic routines shared by all languages that are variants of C.
-   Copyright (C) 1992-2022 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -39,6 +39,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "calls.h"
 #include "stor-layout.h"
 #include "tree-pretty-print.h"
+#include "langhooks.h"
 
 /* Print a warning if a constant expression had overflow in folding.
    Invoke this function on every expression that the language
@@ -1404,12 +1405,19 @@ warnings_for_convert_and_check (location_t loc, tree type, tree expr,
     result = TREE_OPERAND (result, 1);
 
   bool cst = TREE_CODE_CLASS (TREE_CODE (result)) == tcc_constant;
-
   tree exprtype = TREE_TYPE (expr);
+  tree result_diag;
+  /* We're interested in the actual numerical value here, not its ASCII
+     representation.  */
+  if (cst && TYPE_MAIN_VARIANT (TREE_TYPE (result)) == char_type_node)
+    result_diag = fold_convert (integer_type_node, result);
+  else
+    result_diag = result;
 
   if (TREE_CODE (expr) == INTEGER_CST
       && (TREE_CODE (type) == INTEGER_TYPE
-	  || TREE_CODE (type) == ENUMERAL_TYPE)
+	  || (TREE_CODE (type) == ENUMERAL_TYPE
+	      && TREE_CODE (ENUM_UNDERLYING_TYPE (type)) != BOOLEAN_TYPE))
       && !int_fits_type_p (expr, type))
     {
       /* Do not diagnose overflow in a constant expression merely
@@ -1430,7 +1438,7 @@ warnings_for_convert_and_check (location_t loc, tree type, tree expr,
 				  "changes value from %qE to %qE")
 			     : G_("unsigned conversion from %qT to %qT "
 				  "changes value from %qE to %qE")),
-			    exprtype, type, expr, result);
+			    exprtype, type, expr, result_diag);
 	      else
 		warning_at (loc, OPT_Woverflow,
 			    (TYPE_UNSIGNED (exprtype)
@@ -1449,7 +1457,7 @@ warnings_for_convert_and_check (location_t loc, tree type, tree expr,
 	    warning_at (loc, OPT_Woverflow,
 			"overflow in conversion from %qT to %qT "
 			"changes value from %qE to %qE",
-			exprtype, type, expr, result);
+			exprtype, type, expr, result_diag);
 	  else
 	    warning_at (loc, OPT_Woverflow,
 			"overflow in conversion from %qT to %qT "
@@ -1466,7 +1474,7 @@ warnings_for_convert_and_check (location_t loc, tree type, tree expr,
 	    warning_at (loc, OPT_Woverflow,
 			"overflow in conversion from %qT to %qT "
 			"changes value from %qE to %qE",
-			exprtype, type, expr, result);
+			exprtype, type, expr, result_diag);
 	  else
 	    warning_at (loc, OPT_Woverflow,
 			"overflow in conversion from %qT to %qT "
@@ -1483,7 +1491,7 @@ warnings_for_convert_and_check (location_t loc, tree type, tree expr,
 	warning_at (loc, OPT_Woverflow,
 		    "overflow in conversion from %qT to %qT "
 		    "changes value from %qE to %qE",
-		    exprtype, type, expr, result);
+		    exprtype, type, expr, result_diag);
       else
 	warning_at (loc, OPT_Woverflow,
 		    "overflow in conversion from %qT to %qT "
@@ -1732,8 +1740,8 @@ c_do_switch_warnings (splay_tree cases, location_t switch_location,
   for (chain = TYPE_VALUES (type); chain; chain = TREE_CHAIN (chain))
     {
       tree value = TREE_VALUE (chain);
-      if (TREE_CODE (value) == CONST_DECL)
-	value = DECL_INITIAL (value);
+      tree attrs = DECL_ATTRIBUTES (value);
+      value = DECL_INITIAL (value);
       node = splay_tree_lookup (cases, (splay_tree_key) value);
       if (node)
 	{
@@ -1762,6 +1770,13 @@ c_do_switch_warnings (splay_tree cases, location_t switch_location,
 
       /* We've now determined that this enumerated literal isn't
 	 handled by the case labels of the switch statement.  */
+
+      /* Don't warn if the enumerator was marked as unused.  We can't use
+	 TREE_USED here: it could have been set on the enumerator if the
+	 enumerator was used earlier.  */
+      if (lookup_attribute ("unused", attrs)
+	  || lookup_attribute ("maybe_unused", attrs))
+	continue;
 
       /* If the switch expression is a constant, we only really care
 	 about whether that constant is handled by the switch.  */
@@ -2622,14 +2637,19 @@ maybe_warn_shift_overflow (location_t loc, tree op0, tree op1)
       || TREE_CODE (op1) != INTEGER_CST)
     return false;
 
-  tree type0 = TREE_TYPE (op0);
+  /* match.pd could have narrowed the left shift already,
+     take type promotion into account.  */
+  tree type0 = lang_hooks.types.type_promotes_to (TREE_TYPE (op0));
   unsigned int prec0 = TYPE_PRECISION (type0);
 
   /* Left-hand operand must be signed.  */
   if (TYPE_OVERFLOW_WRAPS (type0) || cxx_dialect >= cxx20)
     return false;
 
-  unsigned int min_prec = (wi::min_precision (wi::to_wide (op0), SIGNED)
+  signop sign = SIGNED;
+  if (TYPE_PRECISION (TREE_TYPE (op0)) < TYPE_PRECISION (type0))
+    sign = TYPE_SIGN (TREE_TYPE (op0));
+  unsigned int min_prec = (wi::min_precision (wi::to_wide (op0), sign)
 			   + TREE_INT_CST_LOW (op1));
   /* Handle the case of left-shifting 1 into the sign bit.
    * However, shifting 1 _out_ of the sign bit, as in
@@ -2652,7 +2672,8 @@ maybe_warn_shift_overflow (location_t loc, tree op0, tree op1)
     warning_at (loc, OPT_Wshift_overflow_,
 		"result of %qE requires %u bits to represent, "
 		"but %qT only has %u bits",
-		build2_loc (loc, LSHIFT_EXPR, type0, op0, op1),
+		build2_loc (loc, LSHIFT_EXPR, type0,
+			    fold_convert (type0, op0), op1),
 		min_prec, type0, prec0);
 
   return overflowed;
@@ -3628,6 +3649,8 @@ warn_parm_array_mismatch (location_t origloc, tree fndecl, tree newparms)
       for (tree newvbl = newa->size, curvbl = cura->size; newvbl;
 	   newvbl = TREE_CHAIN (newvbl), curvbl = TREE_CHAIN (curvbl))
 	{
+	  gcc_assert (curvbl);
+
 	  tree newpos = TREE_PURPOSE (newvbl);
 	  tree curpos = TREE_PURPOSE (curvbl);
 
@@ -3809,5 +3832,111 @@ do_warn_array_compare (location_t location, tree_code code, tree op0, tree op1)
       else
 	inform (location, "use %<&%D[0] %s &%D[0]%> to compare the addresses",
 		op0, op_symbol_code (code), op1);
+    }
+}
+
+/* Given LHS_VAL ^ RHS_VAL, where LHS_LOC is the location of the LHS,
+   OPERATOR_LOC is the location of the ^, and RHS_LOC the location of the
+   RHS, complain with -Wxor-used-as-pow if it looks like the user meant
+   exponentiation rather than xor.  */
+
+void
+check_for_xor_used_as_pow (location_t lhs_loc, tree lhs_val,
+			   location_t operator_loc,
+			   location_t rhs_loc, tree rhs_val)
+{
+  /* Only complain if both args are non-negative integer constants that fit
+     in uhwi.  */
+  if (!tree_fits_uhwi_p (lhs_val) || !tree_fits_uhwi_p (rhs_val))
+    return;
+
+  /* Only complain if the LHS is 2 or 10.  */
+  unsigned HOST_WIDE_INT lhs_uhwi = tree_to_uhwi (lhs_val);
+  if (lhs_uhwi != 2 && lhs_uhwi != 10)
+    return;
+
+  unsigned HOST_WIDE_INT rhs_uhwi = tree_to_uhwi (rhs_val);
+  unsigned HOST_WIDE_INT xor_result = lhs_uhwi ^ rhs_uhwi;
+  binary_op_rich_location loc (operator_loc,
+			       lhs_val, rhs_val, false);
+
+  /* Reject cases where we don't have 3 distinct locations.
+     This can happen e.g. due to macro expansion with
+     -ftrack-macro-expansion=0 */
+  if (!(lhs_loc != operator_loc
+	&& lhs_loc != rhs_loc
+	&& operator_loc != rhs_loc))
+    return;
+
+  /* Reject cases in which any of the locations came from a macro.  */
+  if (from_macro_expansion_at (lhs_loc)
+      || from_macro_expansion_at (operator_loc)
+      || from_macro_expansion_at (rhs_loc))
+    return;
+
+  /* If we issue fix-it hints with the warning then we will also issue a
+     note suggesting how to suppress the warning with a different change.
+     These proposed changes are incompatible.  */
+  loc.fixits_cannot_be_auto_applied ();
+
+  auto_diagnostic_group d;
+  bool warned = false;
+  if (lhs_uhwi == 2)
+    {
+      /* Would exponentiation fit in int, in long long, or not at all?  */
+      if (rhs_uhwi < (INT_TYPE_SIZE - 1))
+	{
+	  unsigned HOST_WIDE_INT suggested_result = 1 << rhs_uhwi;
+	  loc.add_fixit_replace (lhs_loc, "1");
+	  loc.add_fixit_replace (operator_loc, "<<");
+	  warned = warning_at (&loc, OPT_Wxor_used_as_pow,
+			       "result of %<%wu^%wu%> is %wu;"
+			       " did you mean %<1 << %wu%> (%wu)?",
+			       lhs_uhwi, rhs_uhwi, xor_result,
+			       rhs_uhwi, suggested_result);
+	}
+      else if (rhs_uhwi < (LONG_LONG_TYPE_SIZE - 1))
+	{
+	  loc.add_fixit_replace (lhs_loc, "1LL");
+	  loc.add_fixit_replace (operator_loc, "<<");
+	  warned = warning_at (&loc, OPT_Wxor_used_as_pow,
+			       "result of %<%wu^%wu%> is %wu;"
+			       " did you mean %<1LL << %wu%>?",
+			       lhs_uhwi, rhs_uhwi, xor_result,
+			       rhs_uhwi);
+	}
+      else if (rhs_uhwi <= LONG_LONG_TYPE_SIZE)
+	warned = warning_at (&loc, OPT_Wxor_used_as_pow,
+			     "result of %<%wu^%wu%> is %wu;"
+			     " did you mean exponentiation?",
+			     lhs_uhwi, rhs_uhwi, xor_result);
+      /* Otherwise assume it's an xor.  */
+    }
+  else
+    {
+      gcc_assert (lhs_uhwi == 10);
+      loc.add_fixit_replace (lhs_loc, "1");
+      loc.add_fixit_replace (operator_loc, "e");
+      warned = warning_at (&loc, OPT_Wxor_used_as_pow,
+			   "result of %<%wu^%wu%> is %wu;"
+			   " did you mean %<1e%wu%>?",
+			   lhs_uhwi, rhs_uhwi, xor_result,
+			   rhs_uhwi);
+    }
+  if (warned)
+    {
+      gcc_rich_location note_loc (lhs_loc);
+      if (lhs_uhwi == 2)
+	note_loc.add_fixit_replace (lhs_loc, "0x2");
+      else
+	{
+	  gcc_assert (lhs_uhwi == 10);
+	  note_loc.add_fixit_replace (lhs_loc, "0xa");
+	}
+      note_loc.fixits_cannot_be_auto_applied ();
+      inform (&note_loc,
+	      "you can silence this warning by using a hexadecimal constant"
+	      " (%wx rather than %wd)",
+	      lhs_uhwi, lhs_uhwi);
     }
 }

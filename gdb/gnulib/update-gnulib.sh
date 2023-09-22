@@ -1,6 +1,6 @@
 #! /bin/sh
 
-# Copyright (C) 2011-2022 Free Software Foundation, Inc.
+# Copyright (C) 2011-2023 Free Software Foundation, Inc.
 #
 # This file is part of GDB.
 #
@@ -84,7 +84,7 @@ IMPORTED_GNULIB_MODULES="\
 "
 
 # The gnulib commit ID to use for the update.
-GNULIB_COMMIT_SHA1="776af40e09b476a41073131a90022572f448c189"
+GNULIB_COMMIT_SHA1="bd11400942d63de12371988dca8144925de9e2c3"
 
 # The expected version number for the various auto tools we will
 # use after the import.
@@ -180,7 +180,6 @@ fi
 # Apply our local patches.
 apply_patches ()
 {
-    echo "Applying $1..."
     patch -p2 -f -i "$1"
     if [ $? -ne 0 ]; then
         echo "Failed to apply some patches.  Aborting."
@@ -189,9 +188,7 @@ apply_patches ()
 }
 
 apply_patches "patches/0001-use-windows-stat"
-apply_patches "patches/0002-glob-tilde-check"
-apply_patches "patches/0003-unistd-h-fix"
-apply_patches "patches/0004-select-mingw"
+apply_patches "patches/0002-no-solaris-_gl_attribute_dealloc"
 
 # Regenerate all necessary files...
 aclocal &&

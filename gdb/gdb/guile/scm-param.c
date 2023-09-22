@@ -1,6 +1,6 @@
 /* GDB parameters implemented in Guile.
 
-   Copyright (C) 2008-2022 Free Software Foundation, Inc.
+   Copyright (C) 2008-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -320,7 +320,7 @@ pascm_set_func (const char *args, int from_tty, struct cmd_list_element *c)
 
   /* GDB is usually silent when a parameter is set.  */
   if (*msg.get () != '\0')
-    printf_filtered ("%s\n", msg.get ());
+    gdb_printf ("%s\n", msg.get ());
 }
 
 /* A callback function that is registered against the respective
@@ -362,7 +362,7 @@ pascm_show_func (struct ui_file *file, int from_tty,
       error (_("Error converting show text to host string."));
     }
 
-  fprintf_filtered (file, "%s\n", msg.get ());
+  gdb_printf (file, "%s\n", msg.get ());
 }
 
 /* A helper function that dispatches to the appropriate add_setshow
@@ -742,7 +742,7 @@ pascm_set_param_value_x (param_smob *p_smob,
       if (var.type () == var_uinteger
 	  || var.type () == var_zuinteger_unlimited)
 	{
-	  SCM_ASSERT_TYPE (gdbscm_is_bool (value)
+	  SCM_ASSERT_TYPE (scm_is_integer (value)
 			   || scm_is_eq (value, unlimited_keyword),
 			   value, arg_pos, func_name,
 			   _("integer or #:unlimited"));

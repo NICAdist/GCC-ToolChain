@@ -1,6 +1,6 @@
 /* Target-dependent code for GNU/Linux i386.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -54,7 +54,7 @@
    group.  Put the LINUX_ORIG_EAX register in the system group.  */
 static int
 i386_linux_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
-				struct reggroup *group)
+				const struct reggroup *group)
 {
   if (regnum == I386_LINUX_ORIG_EAX_REGNUM)
     return (group == system_reggroup
@@ -122,7 +122,7 @@ static const gdb_byte linux_sigtramp_code[] =
    start of the routine.  Otherwise, return 0.  */
 
 static CORE_ADDR
-i386_linux_sigtramp_start (struct frame_info *this_frame)
+i386_linux_sigtramp_start (frame_info_ptr this_frame)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
   gdb_byte buf[LINUX_SIGTRAMP_LEN];
@@ -190,7 +190,7 @@ static const gdb_byte linux_rt_sigtramp_code[] =
    start of the routine.  Otherwise, return 0.  */
 
 static CORE_ADDR
-i386_linux_rt_sigtramp_start (struct frame_info *this_frame)
+i386_linux_rt_sigtramp_start (frame_info_ptr this_frame)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
   gdb_byte buf[LINUX_RT_SIGTRAMP_LEN];
@@ -227,7 +227,7 @@ i386_linux_rt_sigtramp_start (struct frame_info *this_frame)
    routine.  */
 
 static int
-i386_linux_sigtramp_p (struct frame_info *this_frame)
+i386_linux_sigtramp_p (frame_info_ptr this_frame)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
   const char *name;
@@ -252,7 +252,7 @@ i386_linux_sigtramp_p (struct frame_info *this_frame)
 
 static int
 i386_linux_dwarf_signal_frame_p (struct gdbarch *gdbarch,
-				 struct frame_info *this_frame)
+				 frame_info_ptr this_frame)
 {
   CORE_ADDR pc = get_frame_pc (this_frame);
   const char *name;
@@ -275,7 +275,7 @@ i386_linux_dwarf_signal_frame_p (struct gdbarch *gdbarch,
    address of the associated sigcontext structure.  */
 
 static CORE_ADDR
-i386_linux_sigcontext_addr (struct frame_info *this_frame)
+i386_linux_sigcontext_addr (frame_info_ptr this_frame)
 {
   struct gdbarch *gdbarch = get_frame_arch (this_frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
@@ -466,10 +466,10 @@ i386_linux_intx80_sysenter_syscall_record (struct regcache *regcache)
 
   if (syscall_gdb < 0)
     {
-      fprintf_unfiltered (gdb_stderr,
-			  _("Process record and replay target doesn't "
-			    "support syscall number %s\n"), 
-			  plongest (syscall_native));
+      gdb_printf (gdb_stderr,
+		  _("Process record and replay target doesn't "
+		    "support syscall number %s\n"), 
+		  plongest (syscall_native));
       return -1;
     }
 
@@ -763,7 +763,7 @@ i386_linux_iterate_over_regset_sections (struct gdbarch *gdbarch,
 					 void *cb_data,
 					 const struct regcache *regcache)
 {
-  i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   cb (".reg", 68, 68, &i386_gregset, NULL, cb_data);
 
@@ -825,7 +825,7 @@ i386_linux_displaced_step_copy_insn (struct gdbarch *gdbarch,
 static void
 i386_linux_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
   const struct target_desc *tdesc = info.target_desc;
   struct tdesc_arch_data *tdesc_data = info.tdesc_data;
   const struct tdesc_feature *feature;

@@ -1,6 +1,6 @@
 /* Helper routines for parsing XML using Expat.
 
-   Copyright (C) 2006-2022 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -183,11 +183,11 @@ gdb_xml_parser::vdebug (const char *format, va_list ap)
 
   std::string message = string_vprintf (format, ap);
   if (line)
-    fprintf_unfiltered (gdb_stderr, "%s (line %d): %s\n",
-			m_name, line, message.c_str ());
+    gdb_printf (gdb_stderr, "%s (line %d): %s\n",
+		m_name, line, message.c_str ());
   else
-    fprintf_unfiltered (gdb_stderr, "%s: %s\n",
-			m_name, message.c_str ());
+    gdb_printf (gdb_stderr, "%s: %s\n",
+		m_name, message.c_str ());
 }
 
 void
@@ -521,8 +521,7 @@ gdb_xml_fetch_external_entity (XML_Parser expat_parser,
 
       text = fetch_xml_builtin (parser->dtd_name ());
       if (text == NULL)
-	internal_error (__FILE__, __LINE__,
-			_("could not locate built-in DTD %s"),
+	internal_error (_("could not locate built-in DTD %s"),
 			parser->dtd_name ());
     }
   else
@@ -564,8 +563,7 @@ gdb_xml_parser::use_dtd (const char *dtd_name)
   /* Even if no DTD is provided, use the built-in DTD anyway.  */
   err = XML_UseForeignDTD (m_expat_parser, XML_TRUE);
   if (err != XML_ERROR_NONE)
-    internal_error (__FILE__, __LINE__,
-		    _("XML_UseForeignDTD failed: %s"),
+    internal_error (_("XML_UseForeignDTD failed: %s"),
 		    XML_ErrorString (err));
 }
 
@@ -959,7 +957,7 @@ static void
 show_debug_xml (struct ui_file *file, int from_tty,
 		struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("XML debugging is %s.\n"), value);
+  gdb_printf (file, _("XML debugging is %s.\n"), value);
 }
 
 gdb::optional<gdb::char_vector>

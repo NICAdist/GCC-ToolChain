@@ -1,4 +1,4 @@
-# Copyright (C) 2010-2022 Free Software Foundation, Inc.
+# Copyright (C) 2010-2023 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,14 @@
 
 # This file is part of the GDB testsuite.  It tests the mechanism
 # exposing breakpoints to Python.
+
+# The skip_hw_watchpoint_tests checks if watchpoints are supported by the
+# processor.  On PowerPC, the check runs a small test program under gdb
+# to determine if the Power processor supports HW watchpoints.  The check
+# must be done before starting the test so as to not disrupt the execution
+# of the actual test.
+
+set skip_hw_watchpoint_tests_p [skip_hw_watchpoint_tests]
 
 load_lib gdb-python.exp
 
@@ -38,7 +46,7 @@ proc_with_prefix test_bkpt_basic { } {
     # We should start with no breakpoints.
     gdb_test "python print (gdb.breakpoints())" "\\(\\)"
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -120,7 +128,7 @@ proc_with_prefix test_bkpt_deletion { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -155,7 +163,7 @@ proc_with_prefix test_bkpt_cond_and_cmds { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -212,7 +220,7 @@ proc_with_prefix test_bkpt_invisible { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -257,7 +265,7 @@ proc_with_prefix test_hardware_breakpoints { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -275,16 +283,17 @@ proc_with_prefix test_hardware_breakpoints { } {
 
 proc_with_prefix test_watchpoints { } {
     global srcfile testfile hex decimal
+    global skip_hw_watchpoint_tests_p
 
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
     # Disable hardware watchpoints if necessary.
-    if [target_info exists gdb,no_hardware_watchpoints] {
+    if {$skip_hw_watchpoint_tests_p} {
 	gdb_test_no_output "set can-use-hw-watchpoints 0" ""
     }
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -298,17 +307,38 @@ proc_with_prefix test_watchpoints { } {
 
 proc_with_prefix test_bkpt_internal { } {
     global srcfile testfile hex decimal
+    global skip_hw_watchpoint_tests_p
 
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
     # Disable hardware watchpoints if necessary.
-    if [target_info exists gdb,no_hardware_watchpoints] {
+    if {$skip_hw_watchpoint_tests_p} {
 	gdb_test_no_output "set can-use-hw-watchpoints 0" ""
     }
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
+    delete_breakpoints
+    gdb_py_test_silent_cmd  "python bp1 = gdb.Breakpoint (\"main\", type=gdb.BP_BREAKPOINT, wp_class=gdb.WP_WRITE, internal=True )" \
+	"Set internal breakpoint" 0
+
+    set bp_num [get_python_valueof bp1.number "*DEFAULT*"]
+    set bp_addr [gdb_get_bp_addr $bp_num]
+
+    gdb_test "maint info break $bp_num" \
+	"$bp_num.*$bp_addr.*" \
+	"maint info breakpoint \$bp_num"
+
+    gdb_test "python gdb.execute(\'clear *$bp_addr\')" \
+	".*No breakpoint at \\*$bp_addr.*" \
+	"clear internal breakpoint"
+
+    # Check again, make sure that GDB really didn't delete the internal breakpoint.
+    gdb_test "maint info break $bp_num" \
+	"$bp_num.*$bp_addr.*" \
+	"maint info breakpoint \$bp_num after clear"
+
     delete_breakpoints
     gdb_py_test_silent_cmd  "python wp1 = gdb.Breakpoint (\"result\", type=gdb.BP_WATCHPOINT, wp_class=gdb.WP_WRITE, internal=True )" \
 	"Set watchpoint" 0
@@ -325,15 +355,16 @@ proc_with_prefix test_bkpt_internal { } {
 
 proc_with_prefix test_bkpt_eval_funcs { } {
     global srcfile testfile hex decimal
+    global skip_hw_watchpoint_tests_p
 
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
     # Disable hardware watchpoints if necessary.
-    if [target_info exists gdb,no_hardware_watchpoints] {
+    if {$skip_hw_watchpoint_tests_p} {
 	gdb_test_no_output "set can-use-hw-watchpoints 0" ""
     }
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
     delete_breakpoints
@@ -446,7 +477,7 @@ proc_with_prefix test_bkpt_temporary { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
     delete_breakpoints
@@ -564,7 +595,7 @@ proc_with_prefix test_bkpt_explicit_loc {} {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -649,7 +680,7 @@ proc_with_prefix test_bkpt_qualified {} {
     set one_location_re "Breakpoint $decimal at $hex:.*line $decimal."
     set two_location_re "Breakpoint $decimal at $hex:.*2 locations."
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -718,7 +749,7 @@ proc_with_prefix test_bkpt_probe {} {
 	return -1
     }
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -735,7 +766,7 @@ proc_with_prefix test_catchpoints {} {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
 
@@ -794,7 +825,7 @@ proc_with_prefix test_bkpt_auto_disable { } {
     # Start with a fresh gdb.
     clean_restart ${testfile}
 
-    if ![runto_main] then {
+    if {![runto_main]} {
 	return 0
     }
     delete_breakpoints

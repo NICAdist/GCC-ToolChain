@@ -39,7 +39,7 @@ int type2_regs[16] = { 3, 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 2
    that order in a push/pop instruction.  */
 int type3_regs[15] = { 2, 1, 0, 27, 26, 25, 24, 31, 30, 29, 28, 23, 22, 20, 21};
 
-#ifdef DEBUG
+#if WITH_TRACE_ANY_P
 #ifndef SIZE_INSTRUCTION
 #define SIZE_INSTRUCTION 18
 #endif
@@ -339,10 +339,10 @@ Multiply64 (int sign, unsigned long op0)
 	  
       sign = (op0 ^ op1) & 0x80000000;
 	  
-      if (((signed long) op0) < 0)
+      if (op0 & 0x80000000)
 	op0 = - op0;
 	  
-      if (((signed long) op1) < 0)
+      if (op1 & 0x80000000)
 	op1 = - op1;
     }
       
@@ -398,7 +398,7 @@ fetch_str (SIM_DESC sd, address_word addr)
     nr++;
 
   buf = NZALLOC (char, nr + 1);
-  sim_read (simulator, addr, (unsigned char *) buf, nr);
+  sim_read (simulator, addr, buf, nr);
 
   return buf;
 }
@@ -1692,7 +1692,7 @@ OP_10007E0 (void)
 	  {
 	    char *buf = zalloc (PARM3);
 	    RETVAL = sim_io_read (simulator, PARM1, buf, PARM3);
-	    sim_write (simulator, PARM2, (unsigned char *) buf, PARM3);
+	    sim_write (simulator, PARM2, buf, PARM3);
 	    free (buf);
 	    if ((int) RETVAL < 0)
 	      RETERR = sim_io_get_errno (simulator);
@@ -1702,7 +1702,7 @@ OP_10007E0 (void)
 	case TARGET_NEWLIB_V850_SYS_write:
 	  {
 	    char *buf = zalloc (PARM3);
-	    sim_read (simulator, PARM2, (unsigned char *) buf, PARM3);
+	    sim_read (simulator, PARM2, buf, PARM3);
 	    if (PARM1 == 1)
 	      RETVAL = sim_io_write_stdout (simulator, buf, PARM3);
 	    else
@@ -3135,8 +3135,8 @@ v850_div (SIM_DESC sd, unsigned int op0, unsigned int op1, unsigned int *op2p, u
   bfd_boolean     overflow = FALSE;
   
   /* Compute the result.  */
-  divide_by   = op0;
-  divide_this = op1;
+  divide_by   = (int32_t)op0;
+  divide_this = (int32_t)op1;
 
   if (divide_by == 0 || (divide_by == -1 && divide_this == (1 << 31)))
     {
@@ -3267,7 +3267,14 @@ v850_bins (SIM_DESC sd, unsigned int source, unsigned int lsb, unsigned int msb,
   pos = lsb;
   width = (msb - lsb) + 1;
 
-  mask = ~ (-(1 << width));
+  /* A width of 32 exhibits undefined behavior on the shift.  The easiest
+     way to make this code safe is to just avoid that case and set the mask
+     to the right value.  */
+  if (width >= 32)
+    mask = 0xffffffff;
+  else
+    mask = ~ (-(1 << width));
+
   source &= mask;
   mask <<= pos;
   result = (* dest) & ~ mask;

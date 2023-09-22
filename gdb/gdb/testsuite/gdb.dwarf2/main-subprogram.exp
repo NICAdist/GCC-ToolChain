@@ -1,4 +1,4 @@
-# Copyright 2016-2022 Free Software Foundation, Inc.
+# Copyright 2016-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,6 +19,11 @@ if {![dwarf2_support]} {
     return 0
 }
 
+if { [use_gdb_stub] } {
+    unsupported "test requires running"
+    return
+}
+
 standard_testfile .c -dw.S
 
 # Make some DWARF for the test.
@@ -27,8 +32,11 @@ Dwarf::assemble $asm_file {
     global srcfile
 
     cu {} {
+	# Note we don't want C here as that requires canonicalization,
+	# so choose a language that isn't C and that gdb is unlikely
+	# to implement.
 	DW_TAG_compile_unit {
-                {DW_AT_language @DW_LANG_C}
+		{DW_AT_language @DW_LANG_PLI}
                 {DW_AT_name     $srcfile}
                 {DW_AT_comp_dir /tmp}
         } {
@@ -62,7 +70,7 @@ set have_index [exec_has_index_section $binfile]
 # that this was the real "main".
 
 if {[gdb_start_cmd] < 0} {
-    untested "could not start ${testfile}"
+    fail "could not start ${testfile}"
     return -1
 }
 

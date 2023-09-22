@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD/amd64.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,26 +29,20 @@
 #include <sys/user.h>
 #include <machine/reg.h>
 
-#include "fbsd-nat.h"
 #include "amd64-tdep.h"
 #include "amd64-fbsd-tdep.h"
 #include "amd64-nat.h"
 #include "x86-nat.h"
 #include "gdbsupport/x86-xstate.h"
-#include "x86-bsd-nat.h"
+#include "x86-fbsd-nat.h"
 
-class amd64_fbsd_nat_target final
-  : public x86bsd_nat_target<fbsd_nat_target>
+class amd64_fbsd_nat_target final : public x86_fbsd_nat_target
 {
 public:
   void fetch_registers (struct regcache *, int) override;
   void store_registers (struct regcache *, int) override;
 
   const struct target_desc *read_description () override;
-
-#if defined(HAVE_PT_GETDBREGS) && defined(USE_SIGTRAP_SIGINFO)
-  bool supports_stopped_by_hw_breakpoint () override;
-#endif
 };
 
 static amd64_fbsd_nat_target the_amd64_fbsd_nat_target;
@@ -108,7 +102,7 @@ amd64_fbsd_nat_target::fetch_registers (struct regcache *regcache, int regnum)
 {
   struct gdbarch *gdbarch = regcache->arch ();
 #if defined(PT_GETFSBASE) || defined(PT_GETGSBASE)
-  const i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  const i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 #endif
   pid_t pid = get_ptrace_pid (regcache->ptid ());
   const struct regset *gregset = find_gregset (gdbarch);
@@ -180,7 +174,7 @@ amd64_fbsd_nat_target::store_registers (struct regcache *regcache, int regnum)
 {
   struct gdbarch *gdbarch = regcache->arch ();
 #if defined(PT_GETFSBASE) || defined(PT_GETGSBASE)
-  const i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  const i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 #endif
   pid_t pid = get_ptrace_pid (regcache->ptid ());
   const struct regset *gregset = find_gregset (gdbarch);
@@ -347,16 +341,6 @@ amd64_fbsd_nat_target::read_description ()
   else
     return i386_target_description (X86_XSTATE_SSE_MASK, true);
 }
-
-#if defined(HAVE_PT_GETDBREGS) && defined(USE_SIGTRAP_SIGINFO)
-/* Implement the supports_stopped_by_hw_breakpoints method.  */
-
-bool
-amd64_fbsd_nat_target::supports_stopped_by_hw_breakpoint ()
-{
-  return true;
-}
-#endif
 
 void _initialize_amd64fbsd_nat ();
 void

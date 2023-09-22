@@ -1,5 +1,5 @@
 /* Induction variable optimizations.
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -470,7 +470,7 @@ struct iv_cand
   bitmap inv_vars;	/* The list of invariant ssa_vars used in step of the
 			   iv_cand.  */
   bitmap inv_exprs;	/* If step is more complicated than a single ssa_var,
-			   hanlde it as a new invariant expression which will
+			   handle it as a new invariant expression which will
 			   be hoisted out of loop.  */
   struct iv *orig_iv;	/* The original iv if this cand is added from biv with
 			   smaller type.  */

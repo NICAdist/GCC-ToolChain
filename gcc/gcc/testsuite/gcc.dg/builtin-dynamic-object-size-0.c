@@ -1,6 +1,8 @@
 /* { dg-do run } */
 /* { dg-options "-O2" } */
 
+#include "builtin-object-size-common.h"
+
 typedef __SIZE_TYPE__ size_t;
 #define abort __builtin_abort
 
@@ -544,6 +546,52 @@ test_loop (int *obj, size_t sz, size_t start, size_t end, int incr)
   return __builtin_dynamic_object_size (ptr, 0);
 }
 
+/* strdup/strndup.  */
+
+size_t
+__attribute__ ((noinline))
+test_strdup (const char *in)
+{
+  char *res = __builtin_strdup (in);
+  size_t sz = __builtin_dynamic_object_size (res, 0);
+
+  __builtin_free (res);
+  return sz;
+}
+
+size_t
+__attribute__ ((noinline))
+test_strndup (const char *in, size_t bound)
+{
+  char *res = __builtin_strndup (in, bound);
+  size_t sz = __builtin_dynamic_object_size (res, 0);
+
+  __builtin_free (res);
+  return sz;
+}
+
+size_t
+__attribute__ ((noinline))
+test_strdup_min (const char *in)
+{
+  char *res = __builtin_strdup (in);
+  size_t sz = __builtin_dynamic_object_size (res, 2);
+
+  __builtin_free (res);
+  return sz;
+}
+
+size_t
+__attribute__ ((noinline))
+test_strndup_min (const char *in, size_t bound)
+{
+  char *res = __builtin_strndup (in, bound);
+  size_t sz = __builtin_dynamic_object_size (res, 2);
+
+  __builtin_free (res);
+  return sz;
+}
+
 /* Other tests.  */
 
 struct TV4
@@ -557,13 +605,6 @@ test_pr105736 (struct TV4 *a)
 {
   return &a->v[0];
 }
-
-unsigned nfails = 0;
-
-#define FAIL() ({ \
-  __builtin_printf ("Failure at line: %d\n", __LINE__);			      \
-  nfails++;								      \
-})
 
 int
 main (int argc, char **argv)
@@ -734,9 +775,15 @@ main (int argc, char **argv)
   int *t = test_pr105736 (&val3);
   if (__builtin_dynamic_object_size (t, 0) != -1)
     FAIL ();
+  const char *str = "hello world";
+  if (test_strdup (str) != __builtin_strlen (str) + 1)
+    FAIL ();
+  if (test_strndup (str, 4) != 5)
+    FAIL ();
+  if (test_strdup_min (str) != __builtin_strlen (str) + 1)
+    FAIL ();
+  if (test_strndup_min (str, 4) != 1)
+    FAIL ();
 
-  if (nfails > 0)
-    __builtin_abort ();
-
-  return 0;
+  DONE ();
 }

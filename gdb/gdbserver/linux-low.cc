@@ -1,5 +1,5 @@
 /* Low level interface to ptrace, for the remote server for GDB.
-   Copyright (C) 1995-2022 Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -403,8 +403,22 @@ linux_process_target::low_delete_thread (arch_lwp_info *info)
   gdb_assert (info == nullptr);
 }
 
+/* Open the /proc/PID/mem file for PROC.  */
+
+static void
+open_proc_mem_file (process_info *proc)
+{
+  gdb_assert (proc->priv->mem_fd == -1);
+
+  char filename[64];
+  xsnprintf (filename, sizeof filename, "/proc/%d/mem", proc->pid);
+
+  proc->priv->mem_fd
+    = gdb_open_cloexec (filename, O_RDWR | O_LARGEFILE, 0).release ();
+}
+
 process_info *
-linux_process_target::add_linux_process (int pid, int attached)
+linux_process_target::add_linux_process_no_mem_file (int pid, int attached)
 {
   struct process_info *proc;
 
@@ -412,8 +426,32 @@ linux_process_target::add_linux_process (int pid, int attached)
   proc->priv = XCNEW (struct process_info_private);
 
   proc->priv->arch_private = low_new_process ();
+  proc->priv->mem_fd = -1;
 
   return proc;
+}
+
+
+process_info *
+linux_process_target::add_linux_process (int pid, int attached)
+{
+  process_info *proc = add_linux_process_no_mem_file (pid, attached);
+  open_proc_mem_file (proc);
+  return proc;
+}
+
+void
+linux_process_target::remove_linux_process (process_info *proc)
+{
+  if (proc->priv->mem_fd >= 0)
+    close (proc->priv->mem_fd);
+
+  this->low_delete_process (proc->priv->arch_private);
+
+  xfree (proc->priv);
+  proc->priv = nullptr;
+
+  remove_process (proc);
 }
 
 arch_process_info *
@@ -703,14 +741,14 @@ linux_process_target::handle_extended_wait (lwp_info **orig_event_lwp,
       return 0;
     }
 
-  internal_error (__FILE__, __LINE__, _("unknown ptrace event %d"), event);
+  internal_error (_("unknown ptrace event %d"), event);
 }
 
 CORE_ADDR
 linux_process_target::get_pc (lwp_info *lwp)
 {
-  struct regcache *regcache;
-  CORE_ADDR pc;
+  process_info *proc = get_thread_process (get_lwp_thread (lwp));
+  gdb_assert (!proc->starting_up);
 
   if (!low_supports_breakpoints ())
     return 0;
@@ -718,8 +756,8 @@ linux_process_target::get_pc (lwp_info *lwp)
   scoped_restore_current_thread restore_thread;
   switch_to_thread (get_lwp_thread (lwp));
 
-  regcache = get_thread_regcache (current_thread, 1);
-  pc = low_get_pc (regcache);
+  struct regcache *regcache = get_thread_regcache (current_thread, 1);
+  CORE_ADDR pc = low_get_pc (regcache);
 
   threads_debug_printf ("pc is 0x%lx", (long) pc);
 
@@ -758,6 +796,14 @@ linux_process_target::save_stop_reason (lwp_info *lwp)
 
   if (!low_supports_breakpoints ())
     return false;
+
+  process_info *proc = get_thread_process (get_lwp_thread (lwp));
+  if (proc->starting_up)
+    {
+      /* Claim we have the stop PC so that the caller doesn't try to
+	 fetch it itself.  */
+      return true;
+    }
 
   pc = get_pc (lwp);
   sw_breakpoint_pc = pc - low_decr_pc_after_break ();
@@ -932,13 +978,21 @@ linux_process_target::create_inferior (const char *program,
 			 NULL, NULL, NULL, NULL);
   }
 
-  add_linux_process (pid, 0);
+  /* When spawning a new process, we can't open the mem file yet.  We
+     still have to nurse the process through the shell, and that execs
+     a couple times.  The address space a /proc/PID/mem file is
+     accessing is destroyed on exec.  */
+  process_info *proc = add_linux_process_no_mem_file (pid, 0);
 
   ptid = ptid_t (pid, pid);
   new_lwp = add_lwp (ptid);
   new_lwp->must_set_ptrace_flags = 1;
 
   post_fork_inferior (pid, program);
+
+  /* PROC is now past the shell running the program we want, so we can
+     open the /proc/PID/mem file.  */
+  open_proc_mem_file (proc);
 
   return pid;
 }
@@ -1095,18 +1149,22 @@ linux_process_target::attach (unsigned long pid)
   ptid_t ptid = ptid_t (pid, pid);
   int err;
 
-  proc = add_linux_process (pid, 1);
+  /* Delay opening the /proc/PID/mem file until we've successfully
+     attached.  */
+  proc = add_linux_process_no_mem_file (pid, 1);
 
   /* Attach to PID.  We will check for other threads
      soon.  */
   err = attach_lwp (ptid);
   if (err != 0)
     {
-      remove_process (proc);
+      this->remove_linux_process (proc);
 
       std::string reason = linux_ptrace_attach_fail_reason_string (ptid, err);
       error ("Cannot attach to process %ld: %s", pid, reason.c_str ());
     }
+
+  open_proc_mem_file (proc);
 
   /* Don't ignore the initial SIGSTOP if we just attached to this
      process.  It will be collected by wait shortly.  */
@@ -1529,8 +1587,6 @@ linux_process_target::detach (process_info *process)
 void
 linux_process_target::mourn (process_info *process)
 {
-  struct process_info_private *priv;
-
 #ifdef USE_THREAD_DB
   thread_db_mourn (process);
 #endif
@@ -1540,13 +1596,7 @@ linux_process_target::mourn (process_info *process)
       delete_lwp (get_thread_lwp (thread));
     });
 
-  /* Freeing all private data.  */
-  priv = process->priv;
-  low_delete_process (priv->arch_private);
-  free (priv);
-  process->priv = NULL;
-
-  remove_process (process);
+  this->remove_linux_process (process);
 }
 
 void
@@ -1681,9 +1731,9 @@ linux_process_target::status_pending_p_callback (thread_info *thread,
 struct lwp_info *
 find_lwp_pid (ptid_t ptid)
 {
-  thread_info *thread = find_thread ([&] (thread_info *thr_arg)
+  long lwp = ptid.lwp () != 0 ? ptid.lwp () : ptid.pid ();
+  thread_info *thread = find_thread ([lwp] (thread_info *thr_arg)
     {
-      int lwp = ptid.lwp () != 0 ? ptid.lwp () : ptid.pid ();
       return thr_arg->id.lwp () == lwp;
     });
 
@@ -1842,8 +1892,7 @@ lwp_suspended_decr (struct lwp_info *lwp)
     {
       struct thread_info *thread = get_lwp_thread (lwp);
 
-      internal_error (__FILE__, __LINE__,
-		      "unsuspend LWP %ld, suspended=%d\n", lwpid_of (thread),
+      internal_error ("unsuspend LWP %ld, suspended=%d\n", lwpid_of (thread),
 		      lwp->suspended);
     }
 }
@@ -2474,8 +2523,7 @@ linux_process_target::wait_for_event_filtered (ptid_t wait_ptid,
       if (requested_child->suspended
 	  && requested_child->status_pending_p)
 	{
-	  internal_error (__FILE__, __LINE__,
-			  "requesting an event out of a"
+	  internal_error ("requesting an event out of a"
 			  " suspended child?");
 	}
 
@@ -3469,6 +3517,9 @@ linux_process_target::wait_1 (ptid_t ptid, target_waitstatus *ourstatus,
 	unstop_all_lwps (1, event_child);
     }
 
+  /* At this point, we haven't set OURSTATUS.  This is where we do it.  */
+  gdb_assert (ourstatus->kind () == TARGET_WAITKIND_IGNORE);
+
   if (event_child->waitstatus.kind () != TARGET_WAITKIND_IGNORE)
     {
       /* If the reported event is an exit, fork, vfork or exec, let
@@ -3488,8 +3539,31 @@ linux_process_target::wait_1 (ptid_t ptid, target_waitstatus *ourstatus,
     }
   else
     {
-      /* The actual stop signal is overwritten below.  */
-      ourstatus->set_stopped (GDB_SIGNAL_0);
+      /* The LWP stopped due to a plain signal or a syscall signal.  Either way,
+         event_chid->waitstatus wasn't filled in with the details, so look at
+	 the wait status W.  */
+      if (WSTOPSIG (w) == SYSCALL_SIGTRAP)
+	{
+	  int syscall_number;
+
+	  get_syscall_trapinfo (event_child, &syscall_number);
+	  if (event_child->syscall_state == TARGET_WAITKIND_SYSCALL_ENTRY)
+	    ourstatus->set_syscall_entry (syscall_number);
+	  else if (event_child->syscall_state == TARGET_WAITKIND_SYSCALL_RETURN)
+	    ourstatus->set_syscall_return (syscall_number);
+	  else
+	    gdb_assert_not_reached ("unexpected syscall state");
+	}
+      else if (current_thread->last_resume_kind == resume_stop
+	       && WSTOPSIG (w) == SIGSTOP)
+	{
+	  /* A thread that has been requested to stop by GDB with vCont;t,
+	     and it stopped cleanly, so report as SIG0.  The use of
+	     SIGSTOP is an implementation detail.  */
+	  ourstatus->set_stopped (GDB_SIGNAL_0);
+	}
+      else
+	ourstatus->set_stopped (gdb_signal_from_host (WSTOPSIG (w)));
     }
 
   /* Now that we've selected our final event LWP, un-adjust its PC if
@@ -3507,36 +3581,6 @@ linux_process_target::wait_1 (ptid_t ptid, target_waitstatus *ourstatus,
 	  low_set_pc (regcache, event_child->stop_pc + decr_pc);
 	}
     }
-
-  if (WSTOPSIG (w) == SYSCALL_SIGTRAP)
-    {
-      int syscall_number;
-
-      get_syscall_trapinfo (event_child, &syscall_number);
-      if (event_child->syscall_state == TARGET_WAITKIND_SYSCALL_ENTRY)
-	ourstatus->set_syscall_entry (syscall_number);
-      else if (event_child->syscall_state == TARGET_WAITKIND_SYSCALL_RETURN)
-	ourstatus->set_syscall_return (syscall_number);
-      else
-	gdb_assert_not_reached ("unexpected syscall state");
-    }
-  else if (current_thread->last_resume_kind == resume_stop
-	   && WSTOPSIG (w) == SIGSTOP)
-    {
-      /* A thread that has been requested to stop by GDB with vCont;t,
-	 and it stopped cleanly, so report as SIG0.  The use of
-	 SIGSTOP is an implementation detail.  */
-      ourstatus->set_stopped (GDB_SIGNAL_0);
-    }
-  else if (current_thread->last_resume_kind == resume_stop
-	   && WSTOPSIG (w) != SIGSTOP)
-    {
-      /* A thread that has been requested to stop by GDB with vCont;t,
-	 but, it stopped for other reasons.  */
-      ourstatus->set_stopped (gdb_signal_from_host (WSTOPSIG (w)));
-    }
-  else if (ourstatus->kind () == TARGET_WAITKIND_STOPPED)
-    ourstatus->set_stopped (gdb_signal_from_host (WSTOPSIG (w)));
 
   gdb_assert (step_over_bkpt == null_ptid);
 
@@ -3747,8 +3791,7 @@ linux_process_target::stuck_in_jump_pad (thread_info *thread)
 
   if (lwp->suspended != 0)
     {
-      internal_error (__FILE__, __LINE__,
-		      "LWP %ld is suspended, suspended=%d\n",
+      internal_error ("LWP %ld is suspended, suspended=%d\n",
 		      lwpid_of (thread), lwp->suspended);
     }
   gdb_assert (lwp->stopped);
@@ -3771,8 +3814,7 @@ linux_process_target::move_out_of_jump_pad (thread_info *thread)
 
   if (lwp->suspended != 0)
     {
-      internal_error (__FILE__, __LINE__,
-		      "LWP %ld is suspended, suspended=%d\n",
+      internal_error ("LWP %ld is suspended, suspended=%d\n",
 		      lwpid_of (thread), lwp->suspended);
     }
   gdb_assert (lwp->stopped);
@@ -4021,8 +4063,7 @@ linux_process_target::resume_one_lwp_throw (lwp_info *lwp, int step,
 	step = 1;
       else
 	{
-	  internal_error (__FILE__, __LINE__,
-			  "moving out of jump pad single-stepping"
+	  internal_error ("moving out of jump pad single-stepping"
 			  " not implemented on this target");
 	}
     }
@@ -4091,7 +4132,15 @@ linux_process_target::resume_one_lwp_throw (lwp_info *lwp, int step,
 	  (PTRACE_TYPE_ARG4) (uintptr_t) signal);
 
   if (errno)
-    perror_with_name ("resuming thread");
+    {
+      int saved_errno = errno;
+
+      threads_debug_printf ("ptrace errno = %d (%s)",
+			    saved_errno, strerror (saved_errno));
+
+      errno = saved_errno;
+      perror_with_name ("resuming thread");
+    }
 
   /* Successfully resumed.  Clear state that no longer makes sense,
      and mark the LWP as running.  Must not do this before resuming
@@ -4152,7 +4201,15 @@ linux_process_target::resume_one_lwp (lwp_info *lwp, int step, int signal,
     }
   catch (const gdb_exception_error &ex)
     {
-      if (!check_ptrace_stopped_lwp_gone (lwp))
+      if (check_ptrace_stopped_lwp_gone (lwp))
+	{
+	  /* This could because we tried to resume an LWP after its leader
+	     exited.  Mark it as resumed, so we can collect an exit event
+	     from it.  */
+	  lwp->stopped = 0;
+	  lwp->stop_reason = TARGET_STOPPED_BY_NO_REASON;
+	}
+      else
 	throw;
     }
 }
@@ -4407,8 +4464,7 @@ linux_process_target::start_step_over (lwp_info *lwp)
 
   if (lwp->suspended != 0)
     {
-      internal_error (__FILE__, __LINE__,
-		      "LWP %ld suspended=%d\n", lwpid_of (thread),
+      internal_error ("LWP %ld suspended=%d\n", lwpid_of (thread),
 		      lwp->suspended);
     }
 
@@ -5297,93 +5353,71 @@ linux_read_memory (CORE_ADDR memaddr, unsigned char *myaddr, int len)
   return the_target->read_memory (memaddr, myaddr, len);
 }
 
-/* Copy LEN bytes from inferior's memory starting at MEMADDR
-   to debugger memory starting at MYADDR.  */
 
-int
-linux_process_target::read_memory (CORE_ADDR memaddr,
-				   unsigned char *myaddr, int len)
+/* Helper for read_memory/write_memory using /proc/PID/mem.  Because
+   we can use a single read/write call, this can be much more
+   efficient than banging away at PTRACE_PEEKTEXT.  Also, unlike
+   PTRACE_PEEKTEXT/PTRACE_POKETEXT, this works with running threads.
+   One an only one of READBUF and WRITEBUF is non-null.  If READBUF is
+   not null, then we're reading, otherwise we're writing.  */
+
+static int
+proc_xfer_memory (CORE_ADDR memaddr, unsigned char *readbuf,
+		  const gdb_byte *writebuf, int len)
 {
-  int pid = lwpid_of (current_thread);
-  PTRACE_XFER_TYPE *buffer;
-  CORE_ADDR addr;
-  int count;
-  char filename[64];
-  int i;
-  int ret;
-  int fd;
+  gdb_assert ((readbuf == nullptr) != (writebuf == nullptr));
 
-  /* Try using /proc.  Don't bother for one word.  */
-  if (len >= 3 * sizeof (long))
+  process_info *proc = current_process ();
+
+  int fd = proc->priv->mem_fd;
+  if (fd == -1)
+    return EIO;
+
+  while (len > 0)
     {
       int bytes;
-
-      /* We could keep this file open and cache it - possibly one per
-	 thread.  That requires some juggling, but is even faster.  */
-      sprintf (filename, "/proc/%d/mem", pid);
-      fd = open (filename, O_RDONLY | O_LARGEFILE);
-      if (fd == -1)
-	goto no_proc;
 
       /* If pread64 is available, use it.  It's faster if the kernel
 	 supports it (only one syscall), and it's 64-bit safe even on
 	 32-bit platforms (for instance, SPARC debugging a SPARC64
 	 application).  */
 #ifdef HAVE_PREAD64
-      bytes = pread64 (fd, myaddr, len, memaddr);
+      bytes = (readbuf != nullptr
+	       ? pread64 (fd, readbuf, len, memaddr)
+	       : pwrite64 (fd, writebuf, len, memaddr));
 #else
       bytes = -1;
       if (lseek (fd, memaddr, SEEK_SET) != -1)
-	bytes = read (fd, myaddr, len);
+	bytes = (readbuf != nullptr
+		 ? read (fd, readbuf, len)
+		 : write (fd, writebuf, len));
 #endif
 
-      close (fd);
-      if (bytes == len)
-	return 0;
-
-      /* Some data was read, we'll try to get the rest with ptrace.  */
-      if (bytes > 0)
+      if (bytes < 0)
+	return errno;
+      else if (bytes == 0)
 	{
-	  memaddr += bytes;
-	  myaddr += bytes;
-	  len -= bytes;
+	  /* EOF means the address space is gone, the whole process
+	     exited or execed.  */
+	  return EIO;
 	}
+
+      memaddr += bytes;
+      if (readbuf != nullptr)
+	readbuf += bytes;
+      else
+	writebuf += bytes;
+      len -= bytes;
     }
 
- no_proc:
-  /* Round starting address down to longword boundary.  */
-  addr = memaddr & -(CORE_ADDR) sizeof (PTRACE_XFER_TYPE);
-  /* Round ending address up; get number of longwords that makes.  */
-  count = ((((memaddr + len) - addr) + sizeof (PTRACE_XFER_TYPE) - 1)
-	   / sizeof (PTRACE_XFER_TYPE));
-  /* Allocate buffer of that many longwords.  */
-  buffer = XALLOCAVEC (PTRACE_XFER_TYPE, count);
+  return 0;
+}
 
-  /* Read all the longwords */
-  errno = 0;
-  for (i = 0; i < count; i++, addr += sizeof (PTRACE_XFER_TYPE))
-    {
-      /* Coerce the 3rd arg to a uintptr_t first to avoid potential gcc warning
-	 about coercing an 8 byte integer to a 4 byte pointer.  */
-      buffer[i] = ptrace (PTRACE_PEEKTEXT, pid,
-			  (PTRACE_TYPE_ARG3) (uintptr_t) addr,
-			  (PTRACE_TYPE_ARG4) 0);
-      if (errno)
-	break;
-    }
-  ret = errno;
-
-  /* Copy appropriate bytes out of the buffer.  */
-  if (i > 0)
-    {
-      i *= sizeof (PTRACE_XFER_TYPE);
-      i -= memaddr & (sizeof (PTRACE_XFER_TYPE) - 1);
-      memcpy (myaddr,
-	      (char *) buffer + (memaddr & (sizeof (PTRACE_XFER_TYPE) - 1)),
-	      i < len ? i : len);
-    }
-
-  return ret;
+int
+linux_process_target::read_memory (CORE_ADDR memaddr,
+				   unsigned char *myaddr, int len)
+{
+  return proc_xfer_memory (memaddr, myaddr, nullptr, len);
 }
 
 /* Copy LEN bytes of data from debugger memory at MYADDR to inferior's
@@ -5394,25 +5428,6 @@ int
 linux_process_target::write_memory (CORE_ADDR memaddr,
 				    const unsigned char *myaddr, int len)
 {
-  int i;
-  /* Round starting address down to longword boundary.  */
-  CORE_ADDR addr = memaddr & -(CORE_ADDR) sizeof (PTRACE_XFER_TYPE);
-  /* Round ending address up; get number of longwords that makes.  */
-  int count
-    = (((memaddr + len) - addr) + sizeof (PTRACE_XFER_TYPE) - 1)
-    / sizeof (PTRACE_XFER_TYPE);
-
-  /* Allocate buffer of that many longwords.  */
-  PTRACE_XFER_TYPE *buffer = XALLOCAVEC (PTRACE_XFER_TYPE, count);
-
-  int pid = lwpid_of (current_thread);
-
-  if (len == 0)
-    {
-      /* Zero length write always succeeds.  */
-      return 0;
-    }
-
   if (debug_threads)
     {
       /* Dump up to four bytes.  */
@@ -5420,7 +5435,7 @@ linux_process_target::write_memory (CORE_ADDR memaddr,
       char *p = str;
       int dump = len < 4 ? len : 4;
 
-      for (i = 0; i < dump; i++)
+      for (int i = 0; i < dump; i++)
 	{
 	  sprintf (p, "%02x", myaddr[i]);
 	  p += 2;
@@ -5428,54 +5443,10 @@ linux_process_target::write_memory (CORE_ADDR memaddr,
       *p = '\0';
 
       threads_debug_printf ("Writing %s to 0x%08lx in process %d",
-			    str, (long) memaddr, pid);
+			    str, (long) memaddr, current_process ()->pid);
     }
 
-  /* Fill start and end extra bytes of buffer with existing memory data.  */
-
-  errno = 0;
-  /* Coerce the 3rd arg to a uintptr_t first to avoid potential gcc warning
-     about coercing an 8 byte integer to a 4 byte pointer.  */
-  buffer[0] = ptrace (PTRACE_PEEKTEXT, pid,
-		      (PTRACE_TYPE_ARG3) (uintptr_t) addr,
-		      (PTRACE_TYPE_ARG4) 0);
-  if (errno)
-    return errno;
-
-  if (count > 1)
-    {
-      errno = 0;
-      buffer[count - 1]
-	= ptrace (PTRACE_PEEKTEXT, pid,
-		  /* Coerce to a uintptr_t first to avoid potential gcc warning
-		     about coercing an 8 byte integer to a 4 byte pointer.  */
-		  (PTRACE_TYPE_ARG3) (uintptr_t) (addr + (count - 1)
-						  * sizeof (PTRACE_XFER_TYPE)),
-		  (PTRACE_TYPE_ARG4) 0);
-      if (errno)
-	return errno;
-    }
-
-  /* Copy data to be written over corresponding part of buffer.  */
-
-  memcpy ((char *) buffer + (memaddr & (sizeof (PTRACE_XFER_TYPE) - 1)),
-	  myaddr, len);
-
-  /* Write the entire buffer.  */
-
-  for (i = 0; i < count; i++, addr += sizeof (PTRACE_XFER_TYPE))
-    {
-      errno = 0;
-      ptrace (PTRACE_POKETEXT, pid,
-	      /* Coerce to a uintptr_t first to avoid potential gcc warning
-		 about coercing an 8 byte integer to a 4 byte pointer.  */
-	      (PTRACE_TYPE_ARG3) (uintptr_t) addr,
-	      (PTRACE_TYPE_ARG4) buffer[i]);
-      if (errno)
-	return errno;
-    }
-
-  return 0;
+  return proc_xfer_memory (memaddr, nullptr, myaddr, len);
 }
 
 void
@@ -5496,7 +5467,10 @@ linux_process_target::request_interrupt ()
 {
   /* Send a SIGINT to the process group.  This acts just like the user
      typed a ^C on the controlling terminal.  */
-  ::kill (-signal_pid, SIGINT);
+  int res = ::kill (-signal_pid, SIGINT);
+  if (res == -1)
+    warning (_("Sending SIGINT to process group of pid %ld failed: %s"),
+	     signal_pid, safe_strerror (errno));
 }
 
 bool
@@ -6179,25 +6153,6 @@ linux_process_target::unpause_all (bool unfreeze)
   unstop_all_lwps (unfreeze, NULL);
 }
 
-int
-linux_process_target::prepare_to_access_memory ()
-{
-  /* Neither ptrace nor /proc/PID/mem allow accessing memory through a
-     running LWP.  */
-  if (non_stop)
-    target_pause_all (true);
-  return 0;
-}
-
-void
-linux_process_target::done_accessing_memory ()
-{
-  /* Neither ptrace nor /proc/PID/mem allow accessing memory through a
-     running LWP.  */
-  if (non_stop)
-    target_unpause_all (true);
-}
-
 /* Extract &phdr and num_phdr in the inferior.  Return 0 on success.  */
 
 static int
@@ -6485,6 +6440,9 @@ struct link_map_offsets
     /* Offset and size of r_debug.r_map.  */
     int r_map_offset;
 
+    /* Offset of r_debug_extended.r_next.  */
+    int r_next_offset;
+
     /* Offset to l_addr field in struct link_map.  */
     int l_addr_offset;
 
@@ -6501,116 +6459,37 @@ struct link_map_offsets
     int l_prev_offset;
   };
 
-/* Construct qXfer:libraries-svr4:read reply.  */
+static const link_map_offsets lmo_32bit_offsets =
+  {
+    0,     /* r_version offset.  */
+    4,     /* r_debug.r_map offset.  */
+    20,    /* r_debug_extended.r_next.  */
+    0,     /* l_addr offset in link_map.  */
+    4,     /* l_name offset in link_map.  */
+    8,     /* l_ld offset in link_map.  */
+    12,    /* l_next offset in link_map.  */
+    16     /* l_prev offset in link_map.  */
+  };
 
-int
-linux_process_target::qxfer_libraries_svr4 (const char *annex,
-					    unsigned char *readbuf,
-					    unsigned const char *writebuf,
-					    CORE_ADDR offset, int len)
+static const link_map_offsets lmo_64bit_offsets =
+  {
+    0,     /* r_version offset.  */
+    8,     /* r_debug.r_map offset.  */
+    40,    /* r_debug_extended.r_next.  */
+    0,     /* l_addr offset in link_map.  */
+    8,     /* l_name offset in link_map.  */
+    16,    /* l_ld offset in link_map.  */
+    24,    /* l_next offset in link_map.  */
+    32     /* l_prev offset in link_map.  */
+  };
+
+/* Get the loaded shared libraries from one namespace.  */
+
+static void
+read_link_map (std::string &document, CORE_ADDR lmid, CORE_ADDR lm_addr,
+	       CORE_ADDR lm_prev, int ptr_size, const link_map_offsets *lmo)
 {
-  struct process_info_private *const priv = current_process ()->priv;
-  char filename[PATH_MAX];
-  int pid, is_elf64;
-
-  static const struct link_map_offsets lmo_32bit_offsets =
-    {
-      0,     /* r_version offset. */
-      4,     /* r_debug.r_map offset.  */
-      0,     /* l_addr offset in link_map.  */
-      4,     /* l_name offset in link_map.  */
-      8,     /* l_ld offset in link_map.  */
-      12,    /* l_next offset in link_map.  */
-      16     /* l_prev offset in link_map.  */
-    };
-
-  static const struct link_map_offsets lmo_64bit_offsets =
-    {
-      0,     /* r_version offset. */
-      8,     /* r_debug.r_map offset.  */
-      0,     /* l_addr offset in link_map.  */
-      8,     /* l_name offset in link_map.  */
-      16,    /* l_ld offset in link_map.  */
-      24,    /* l_next offset in link_map.  */
-      32     /* l_prev offset in link_map.  */
-    };
-  const struct link_map_offsets *lmo;
-  unsigned int machine;
-  int ptr_size;
-  CORE_ADDR lm_addr = 0, lm_prev = 0;
   CORE_ADDR l_name, l_addr, l_ld, l_next, l_prev;
-  int header_done = 0;
-
-  if (writebuf != NULL)
-    return -2;
-  if (readbuf == NULL)
-    return -1;
-
-  pid = lwpid_of (current_thread);
-  xsnprintf (filename, sizeof filename, "/proc/%d/exe", pid);
-  is_elf64 = elf_64_file_p (filename, &machine);
-  lmo = is_elf64 ? &lmo_64bit_offsets : &lmo_32bit_offsets;
-  ptr_size = is_elf64 ? 8 : 4;
-
-  while (annex[0] != '\0')
-    {
-      const char *sep;
-      CORE_ADDR *addrp;
-      int name_len;
-
-      sep = strchr (annex, '=');
-      if (sep == NULL)
-	break;
-
-      name_len = sep - annex;
-      if (name_len == 5 && startswith (annex, "start"))
-	addrp = &lm_addr;
-      else if (name_len == 4 && startswith (annex, "prev"))
-	addrp = &lm_prev;
-      else
-	{
-	  annex = strchr (sep, ';');
-	  if (annex == NULL)
-	    break;
-	  annex++;
-	  continue;
-	}
-
-      annex = decode_address_to_semicolon (addrp, sep + 1);
-    }
-
-  if (lm_addr == 0)
-    {
-      int r_version = 0;
-
-      if (priv->r_debug == 0)
-	priv->r_debug = get_r_debug (pid, is_elf64);
-
-      /* We failed to find DT_DEBUG.  Such situation will not change
-	 for this inferior - do not retry it.  Report it to GDB as
-	 E01, see for the reasons at the GDB solib-svr4.c side.  */
-      if (priv->r_debug == (CORE_ADDR) -1)
-	return -1;
-
-      if (priv->r_debug != 0)
-	{
-	  if (linux_read_memory (priv->r_debug + lmo->r_version_offset,
-				 (unsigned char *) &r_version,
-				 sizeof (r_version)) != 0
-	      || r_version < 1)
-	    {
-	      warning ("unexpected r_debug version %d", r_version);
-	    }
-	  else if (read_one_ptr (priv->r_debug + lmo->r_map_offset,
-				 &lm_addr, ptr_size) != 0)
-	    {
-	      warning ("unable to read r_map from 0x%lx",
-		       (long) priv->r_debug + lmo->r_map_offset);
-	    }
-	}
-    }
-
-  std::string document = "<library-list-svr4 version=\"1.0\"";
 
   while (lm_addr
 	 && read_one_ptr (lm_addr + lmo->l_name_offset,
@@ -6628,55 +6507,198 @@ linux_process_target::qxfer_libraries_svr4 (const char *annex,
 
       if (lm_prev != l_prev)
 	{
-	  warning ("Corrupted shared library list: 0x%lx != 0x%lx",
-		   (long) lm_prev, (long) l_prev);
+	  warning ("Corrupted shared library list: 0x%s != 0x%s",
+		   paddress (lm_prev), paddress (l_prev));
 	  break;
 	}
 
-      /* Ignore the first entry even if it has valid name as the first entry
-	 corresponds to the main executable.  The first entry should not be
-	 skipped if the dynamic loader was loaded late by a static executable
-	 (see solib-svr4.c parameter ignore_first).  But in such case the main
-	 executable does not have PT_DYNAMIC present and this function already
-	 exited above due to failed get_r_debug.  */
-      if (lm_prev == 0)
-	string_appendf (document, " main-lm=\"0x%lx\"", (unsigned long) lm_addr);
-      else
+      /* Not checking for error because reading may stop before we've got
+	 PATH_MAX worth of characters.  */
+      libname[0] = '\0';
+      linux_read_memory (l_name, libname, sizeof (libname) - 1);
+      libname[sizeof (libname) - 1] = '\0';
+      if (libname[0] != '\0')
 	{
-	  /* Not checking for error because reading may stop before
-	     we've got PATH_MAX worth of characters.  */
-	  libname[0] = '\0';
-	  linux_read_memory (l_name, libname, sizeof (libname) - 1);
-	  libname[sizeof (libname) - 1] = '\0';
-	  if (libname[0] != '\0')
-	    {
-	      if (!header_done)
-		{
-		  /* Terminate `<library-list-svr4'.  */
-		  document += '>';
-		  header_done = 1;
-		}
-
-	      string_appendf (document, "<library name=\"");
-	      xml_escape_text_append (&document, (char *) libname);
-	      string_appendf (document, "\" lm=\"0x%lx\" "
-			      "l_addr=\"0x%lx\" l_ld=\"0x%lx\"/>",
-			      (unsigned long) lm_addr, (unsigned long) l_addr,
-			      (unsigned long) l_ld);
-	    }
+	  string_appendf (document, "<library name=\"");
+	  xml_escape_text_append (document, (char *) libname);
+	  string_appendf (document, "\" lm=\"0x%s\" l_addr=\"0x%s\" "
+			  "l_ld=\"0x%s\" lmid=\"0x%s\"/>",
+			  paddress (lm_addr), paddress (l_addr),
+			  paddress (l_ld), paddress (lmid));
 	}
 
       lm_prev = lm_addr;
       lm_addr = l_next;
     }
+}
 
-  if (!header_done)
+/* Construct qXfer:libraries-svr4:read reply.  */
+
+int
+linux_process_target::qxfer_libraries_svr4 (const char *annex,
+					    unsigned char *readbuf,
+					    unsigned const char *writebuf,
+					    CORE_ADDR offset, int len)
+{
+  struct process_info_private *const priv = current_process ()->priv;
+  char filename[PATH_MAX];
+  int pid, is_elf64;
+  unsigned int machine;
+  CORE_ADDR lmid = 0, lm_addr = 0, lm_prev = 0;
+
+  if (writebuf != NULL)
+    return -2;
+  if (readbuf == NULL)
+    return -1;
+
+  pid = lwpid_of (current_thread);
+  xsnprintf (filename, sizeof filename, "/proc/%d/exe", pid);
+  is_elf64 = elf_64_file_p (filename, &machine);
+  const link_map_offsets *lmo;
+  int ptr_size;
+  if (is_elf64)
     {
-      /* Empty list; terminate `<library-list-svr4'.  */
-      document += "/>";
+      lmo = &lmo_64bit_offsets;
+      ptr_size = 8;
     }
   else
-    document += "</library-list-svr4>";
+    {
+      lmo = &lmo_32bit_offsets;
+      ptr_size = 4;
+    }
+
+  while (annex[0] != '\0')
+    {
+      const char *sep;
+      CORE_ADDR *addrp;
+      int name_len;
+
+      sep = strchr (annex, '=');
+      if (sep == NULL)
+	break;
+
+      name_len = sep - annex;
+      if (name_len == 4 && startswith (annex, "lmid"))
+	addrp = &lmid;
+      else if (name_len == 5 && startswith (annex, "start"))
+	addrp = &lm_addr;
+      else if (name_len == 4 && startswith (annex, "prev"))
+	addrp = &lm_prev;
+      else
+	{
+	  annex = strchr (sep, ';');
+	  if (annex == NULL)
+	    break;
+	  annex++;
+	  continue;
+	}
+
+      annex = decode_address_to_semicolon (addrp, sep + 1);
+    }
+
+  std::string document = "<library-list-svr4 version=\"1.0\"";
+
+  /* When the starting LM_ADDR is passed in the annex, only traverse that
+     namespace, which is assumed to be identified by LMID.
+
+     Otherwise, start with R_DEBUG and traverse all namespaces we find.  */
+  if (lm_addr != 0)
+    {
+      document += ">";
+      read_link_map (document, lmid, lm_addr, lm_prev, ptr_size, lmo);
+    }
+  else
+    {
+      if (lm_prev != 0)
+	warning ("ignoring prev=0x%s without start", paddress (lm_prev));
+
+      /* We could interpret LMID as 'provide only the libraries for this
+	 namespace' but GDB is currently only providing lmid, start, and
+	 prev, or nothing.  */
+      if (lmid != 0)
+	warning ("ignoring lmid=0x%s without start", paddress (lmid));
+
+      CORE_ADDR r_debug = priv->r_debug;
+      if (r_debug == 0)
+	r_debug = priv->r_debug = get_r_debug (pid, is_elf64);
+
+      /* We failed to find DT_DEBUG.  Such situation will not change
+	 for this inferior - do not retry it.  Report it to GDB as
+	 E01, see for the reasons at the GDB solib-svr4.c side.  */
+      if (r_debug == (CORE_ADDR) -1)
+	return -1;
+
+      /* Terminate the header if we end up with an empty list.  */
+      if (r_debug == 0)
+	document += ">";
+
+      while (r_debug != 0)
+	{
+	  int r_version = 0;
+	  if (linux_read_memory (r_debug + lmo->r_version_offset,
+				 (unsigned char *) &r_version,
+				 sizeof (r_version)) != 0)
+	    {
+	      warning ("unable to read r_version from 0x%s",
+		       paddress (r_debug + lmo->r_version_offset));
+	      break;
+	    }
+
+	  if (r_version < 1)
+	    {
+	      warning ("unexpected r_debug version %d", r_version);
+	      break;
+	    }
+
+	  if (read_one_ptr (r_debug + lmo->r_map_offset, &lm_addr,
+			    ptr_size) != 0)
+	    {
+	      warning ("unable to read r_map from 0x%s",
+		       paddress (r_debug + lmo->r_map_offset));
+	      break;
+	    }
+
+	  /* We read the entire namespace.  */
+	  lm_prev = 0;
+
+	  /* The first entry corresponds to the main executable unless the
+	     dynamic loader was loaded late by a static executable.  But
+	     in such case the main executable does not have PT_DYNAMIC
+	     present and we would not have gotten here.  */
+	  if (r_debug == priv->r_debug)
+	    {
+	      if (lm_addr != 0)
+		string_appendf (document, " main-lm=\"0x%s\">",
+				paddress (lm_addr));
+	      else
+		document += ">";
+
+	      lm_prev = lm_addr;
+	      if (read_one_ptr (lm_addr + lmo->l_next_offset,
+				&lm_addr, ptr_size) != 0)
+		{
+		  warning ("unable to read l_next from 0x%s",
+			   paddress (lm_addr + lmo->l_next_offset));
+		  break;
+		}
+	    }
+
+	  read_link_map (document, r_debug, lm_addr, lm_prev, ptr_size, lmo);
+
+	  if (r_version < 2)
+	    break;
+
+	  if (read_one_ptr (r_debug + lmo->r_next_offset, &r_debug,
+			    ptr_size) != 0)
+	    {
+	      warning ("unable to read r_next from 0x%s",
+		       paddress (r_debug + lmo->r_next_offset));
+	      break;
+	    }
+	}
+    }
+
+  document += "</library-list-svr4>";
 
   int document_len = document.length ();
   if (offset < document_len)
@@ -6692,6 +6714,12 @@ linux_process_target::qxfer_libraries_svr4 (const char *annex,
 }
 
 #ifdef HAVE_LINUX_BTRACE
+
+bool
+linux_process_target::supports_btrace ()
+{
+  return true;
+}
 
 btrace_target_info *
 linux_process_target::enable_btrace (thread_info *tp,

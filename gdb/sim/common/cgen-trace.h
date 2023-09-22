@@ -1,5 +1,5 @@
 /* Simulator tracing support for Cpu tools GENerated simulators.
-   Copyright (C) 1996-2022 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -78,6 +78,7 @@ typedef struct {
 
 /* String printer for the disassembler.  */
 extern int sim_disasm_sprintf (SFILE *, const char *, ...) ATTRIBUTE_PRINTF_2;
+extern int sim_disasm_styled_sprintf (SFILE *, enum disassembler_style, const char *, ...) ATTRIBUTE_PRINTF_3;
 
 /* For opcodes based disassemblers.  */
 #ifdef __BFD_H_SEEN__

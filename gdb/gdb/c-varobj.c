@@ -1,6 +1,6 @@
 /* varobj support for C and C++.
 
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -191,9 +191,9 @@ c_number_of_children (const struct varobj *var)
   switch (type->code ())
     {
     case TYPE_CODE_ARRAY:
-      if (TYPE_LENGTH (type) > 0 && TYPE_LENGTH (target) > 0
+      if (type->length () > 0 && target->length () > 0
 	  && (type->bounds ()->high.kind () != PROP_UNDEFINED))
-	children = TYPE_LENGTH (type) / TYPE_LENGTH (target);
+	children = type->length () / target->length ();
       else
 	/* If we don't know how many elements there are, don't display
 	   any.  */
@@ -403,7 +403,7 @@ c_describe_child (const struct varobj *parent, int index,
 	 check_typedef and here, we want to show the true
 	 declared type of the variable.  */
       if (ctype)
-	*ctype = TYPE_TARGET_TYPE (type);
+	*ctype = type->target_type ();
 
       if (cfull_expression)
 	*cfull_expression = string_printf ("*(%s)", parent_expression.c_str ());
@@ -482,7 +482,7 @@ c_value_of_variable (const struct varobj *var,
 
   /* Strip top-level references.  */
   while (TYPE_IS_REFERENCE (type))
-    type = check_typedef (TYPE_TARGET_TYPE (type));
+    type = check_typedef (type->target_type ());
 
   switch (type->code ())
     {

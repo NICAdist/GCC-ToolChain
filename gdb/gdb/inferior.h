@@ -1,7 +1,7 @@
 /* Variables that describe the inferior process running under GDB:
    Where it is, why it stopped, and how to step it.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -25,7 +25,7 @@
 #include <list>
 
 struct target_waitstatus;
-struct frame_info;
+class frame_info_ptr;
 struct ui_file;
 struct type;
 struct gdbarch;
@@ -156,7 +156,7 @@ extern void reopen_exec_file (void);
 
 extern void default_print_registers_info (struct gdbarch *gdbarch,
 					  struct ui_file *file,
-					  struct frame_info *frame,
+					  frame_info_ptr frame,
 					  int regnum, int all);
 
 /* Default implementation of gdbarch_print_float_info.  Print
@@ -164,8 +164,29 @@ extern void default_print_registers_info (struct gdbarch *gdbarch,
 
 extern void default_print_float_info (struct gdbarch *gdbarch,
 				      struct ui_file *file,
-				      struct frame_info *frame,
+				      frame_info_ptr frame,
 				      const char *args);
+
+/* Try to determine whether TTY is GDB's input terminal.  Returns
+   TRIBOOL_UNKNOWN if we can't tell.  */
+
+extern tribool is_gdb_terminal (const char *tty);
+
+/* Helper for sharing_input_terminal.  Try to determine whether pid
+   PID is using the same TTY for input as GDB is.  Returns
+   TRIBOOL_UNKNOWN if we can't tell.  */
+
+extern tribool sharing_input_terminal (int pid);
+
+/* The type of the function that is called when SIGINT is handled.  */
+
+typedef void c_c_handler_ftype (int);
+
+/* Install a new SIGINT handler in a host-dependent way.  The previous
+   handler is returned.  It is fine to pass SIG_IGN for FN, but not
+   SIG_DFL.  */
+
+extern c_c_handler_ftype *install_sigint_handler (c_c_handler_ftype *fn);
 
 extern void child_terminal_info (struct target_ops *self, const char *, int);
 
@@ -282,9 +303,6 @@ enum stop_kind
   };
 
 
-/* Possible values for gdbarch_call_dummy_location.  */
-#define ON_STACK 1
-#define AT_ENTRY_POINT 4
 
 /* Base class for target-specific inferior data.  */
 
@@ -369,7 +387,7 @@ public:
   int unpush_target (struct target_ops *t);
 
   /* Returns true if T is pushed in this inferior's target stack.  */
-  bool target_is_pushed (target_ops *t)
+  bool target_is_pushed (const target_ops *t) const
   { return m_target_stack.is_pushed (t); }
 
   /* Find the target beneath T in this inferior's target stack.  */
@@ -379,6 +397,22 @@ public:
   /* Return the target at the top of this inferior's target stack.  */
   target_ops *top_target ()
   { return m_target_stack.top (); }
+
+  /* Unpush all targets except the dummy target from m_target_stack.  As
+     targets are removed from m_target_stack their reference count is
+     decremented, which may cause a target to close.  */
+  void pop_all_targets ()
+  { pop_all_targets_above (dummy_stratum); }
+
+  /* Unpush all targets above STRATUM from m_target_stack.  As targets are
+     removed from m_target_stack their reference count is decremented,
+     which may cause a target to close.  */
+  void pop_all_targets_above (enum strata stratum);
+
+  /* Unpush all targets at and above STRATUM from m_target_stack.  As
+     targets are removed from m_target_stack their reference count is
+     decremented, which may cause a target to close.  */
+  void pop_all_targets_at_and_above (enum strata stratum);
 
   /* Return the target at process_stratum level in this inferior's
      target stack.  */
@@ -537,10 +571,10 @@ public:
      exits or execs.  */
   bool pending_detach = false;
 
-  /* True if this inferior is a vfork parent waiting for a vfork child
-     not under our control to be done with the shared memory region,
-     either by exiting or execing.  */
-  bool waiting_for_vfork_done = false;
+  /* If non-nullptr, points to a thread that called vfork and is now waiting
+     for a vfork child not under our control to be done with the shared memory
+     region, either by exiting or execing.  */
+  thread_info *thread_waiting_for_vfork_done = nullptr;
 
   /* True if we're in the process of detaching from this inferior.  */
   bool detaching = false;
@@ -550,6 +584,13 @@ public:
      registers, as we haven't determined the target
      architecture/description.  */
   bool needs_setup = false;
+
+  /* True if the inferior is starting up (inside startup_inferior),
+     and we're nursing it along (through the shell) until it is ready
+     to execute its first instruction.  Until that is done, we must
+     not access inferior memory or registers, as we haven't determined
+     the target architecture/description.  */
+  bool starting_up = false;
 
   /* True when we are reading the library list of the inferior during an
      attach or handling a fork child.  */
@@ -588,9 +629,13 @@ public:
   displaced_step_inferior_state displaced_step_state;
 
   /* Per inferior data-pointers required by other GDB modules.  */
-  REGISTRY_FIELDS;
+  registry<inferior> registry_fields;
 
 private:
+
+  /* Unpush TARGET and assert that it worked.  */
+  void unpush_target_and_assert (struct target_ops *target);
+
   /* The inferior's target stack.  */
   target_stack m_target_stack;
 
@@ -607,11 +652,6 @@ private:
      this inferior.  */
   std::string m_cwd;
 };
-
-/* Keep a registry of per-inferior data-pointers required by other GDB
-   modules.  */
-
-DECLARE_REGISTRY (inferior);
 
 /* Add an inferior to the inferior list, print a message that a new
    inferior is found, and return the pointer to the new inferior.

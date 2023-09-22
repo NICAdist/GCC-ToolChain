@@ -1,5 +1,5 @@
 /* sim-main.h -- Simulator for Motorola 68HC11 & 68HC12
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Written by Stephane Carrez (stcarrez@nerim.fr)
 
 This file is part of GDB, the GNU debugger.
@@ -539,7 +539,8 @@ extern void cpu_set_sp (sim_cpu *cpu, uint16_t val);
 extern int cpu_reset (sim_cpu *cpu);
 extern int cpu_restart (sim_cpu *cpu);
 extern void sim_memory_error (sim_cpu *cpu, SIM_SIGNAL excep,
-                              uint16_t addr, const char *message, ...);
+			      uint16_t addr, const char *message, ...)
+  ATTRIBUTE_PRINTF (4, 5);
 extern void emul_os (int op, sim_cpu *cpu);
 extern void cpu_interp_m6811 (sim_cpu *cpu);
 extern void cpu_interp_m6812 (sim_cpu *cpu);

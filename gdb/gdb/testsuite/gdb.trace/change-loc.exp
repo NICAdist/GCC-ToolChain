@@ -1,4 +1,4 @@
-# Copyright 2011-2022 Free Software Foundation, Inc.
+# Copyright 2011-2023 Free Software Foundation, Inc.
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 3 of the License, or
@@ -34,10 +34,6 @@ set lib_sl2 [standard_output_file $libfile2.sl]
 
 set lib_opts debug
 
-if [get_compiler_info] {
-    return -1
-}
-
 # Some targets have leading underscores on assembly symbols.
 set additional_flags [list debug shlib=$lib_sl1 shlib_load [gdb_target_symbol_prefix_flags]]
 
@@ -57,7 +53,7 @@ if ![runto_main] {
     return -1
 }
 
-if { ![gdb_target_supports_trace] } then {
+if {![gdb_target_supports_trace]} {
     unsupported "current target does not support trace"
     return -1
 }

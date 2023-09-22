@@ -1,5 +1,5 @@
 /* Simulator for Motorola's MCore processor
-   Copyright (C) 1999-2022 Free Software Foundation, Inc.
+   Copyright (C) 1999-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Solutions.
 
 This file is part of GDB, the GNU debugger.
@@ -42,7 +42,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
 
 
 static unsigned long
-mcore_extract_unsigned_integer (unsigned char *addr, int len)
+mcore_extract_unsigned_integer (const unsigned char *addr, int len)
 {
   unsigned long retval;
   unsigned char * p;
@@ -1242,7 +1242,7 @@ sim_engine_run (SIM_DESC sd,
 }
 
 static int
-mcore_reg_store (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
+mcore_reg_store (SIM_CPU *cpu, int rn, const void *memory, int length)
 {
   if (rn < NUM_MCORE_REGS && rn >= 0)
     {
@@ -1262,7 +1262,7 @@ mcore_reg_store (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
 }
 
 static int
-mcore_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *memory, int length)
+mcore_reg_fetch (SIM_CPU *cpu, int rn, void *memory, int length)
 {
   if (rn < NUM_MCORE_REGS && rn >= 0)
     {

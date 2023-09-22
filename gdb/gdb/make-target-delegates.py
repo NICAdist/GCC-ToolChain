@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (C) 2013-2022 Free Software Foundation, Inc.
+# Copyright (C) 2013-2023 Free Software Foundation, Inc.
 #
 # This file is part of GDB.
 #
@@ -246,7 +246,7 @@ def write_debugmethod(f, content, name, return_type, argtypes):
     if return_type != "void":
         print("  " + return_type + " result;", file=f)
     print(
-        '  fprintf_unfiltered (gdb_stdlog, "-> %s->'
+        '  gdb_printf (gdb_stdlog, "-> %s->'
         + name
         + ' (...)\\n", this->beneath ()->shortname ());',
         file=f,
@@ -262,23 +262,23 @@ def write_debugmethod(f, content, name, return_type, argtypes):
 
     # Now print the arguments.
     print(
-        '  fprintf_unfiltered (gdb_stdlog, "<- %s->'
+        '  gdb_printf (gdb_stdlog, "<- %s->'
         + name
         + ' (", this->beneath ()->shortname ());',
         file=f,
     )
     for i in range(len(argtypes)):
         if i > 0:
-            print('  fputs_unfiltered (", ", gdb_stdlog);', file=f)
+            print('  gdb_puts (", ", gdb_stdlog);', file=f)
         printer = munge_type(argtypes[i])
         print("  " + printer + " (" + names[i] + ");", file=f)
     if return_type != "void":
-        print('  fputs_unfiltered (") = ", gdb_stdlog);', file=f)
+        print('  gdb_puts (") = ", gdb_stdlog);', file=f)
         printer = munge_type(return_type)
         print("  " + printer + " (result);", file=f)
-        print('  fputs_unfiltered ("\\n", gdb_stdlog);', file=f)
+        print('  gdb_puts ("\\n", gdb_stdlog);', file=f)
     else:
-        print('  fputs_unfiltered (")\\n", gdb_stdlog);', file=f)
+        print('  gdb_puts (")\\n", gdb_stdlog);', file=f)
 
     if return_type != "void":
         print("  return result;", file=f)

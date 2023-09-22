@@ -624,6 +624,7 @@ ac_subst_vars='am__EXEEXT_FALSE
 am__EXEEXT_TRUE
 LTLIBOBJS
 LIBOBJS
+CONFIG_STATUS_DEPENDENCIES
 WERROR_CFLAGS
 WARN_CFLAGS
 HAVE_PIPE_OR_PIPE2_FALSE
@@ -7319,7 +7320,7 @@ else
       # Check to see if the program is GNU ld.  I'd rather use --version,
       # but apparently some GNU ld's only accept -v.
       # Break only if it was the GNU/non-GNU ld that we prefer.
-      if "$acl_cv_path_LD" -v 2>&1 < /dev/null | egrep '(GNU|with BFD)' > /dev/null; then
+      if "$acl_cv_path_LD" -v 2>&1 < /dev/null | $EGREP '(GNU|with BFD)' > /dev/null; then
 	test "$with_gnu_ld" != no && break
       else
 	test "$with_gnu_ld" != yes && break
@@ -7347,7 +7348,7 @@ if ${acl_cv_prog_gnu_ld+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   # I'd rather use --version here, but apparently some GNU ld's only accept -v.
-if $LD -v 2>&1 </dev/null | egrep '(GNU|with BFD)' 1>&5; then
+if $LD -v 2>&1 </dev/null | $EGREP '(GNU|with BFD)' 1>&5; then
   acl_cv_prog_gnu_ld=yes
 else
   acl_cv_prog_gnu_ld=no
@@ -8945,20 +8946,29 @@ ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ex
 ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
 
 
-  if test "$threads" = "yes"; then
-    save_LIBS="$LIBS"
-    LIBS="$PTHREAD_LIBS $LIBS"
-    save_CXXFLAGS="$CXXFLAGS"
-    CXXFLAGS="$PTHREAD_CFLAGS $save_CXXFLAGS"
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for std::thread" >&5
+  save_LIBS="$LIBS"
+  LIBS="$PTHREAD_LIBS $LIBS"
+  save_CXXFLAGS="$CXXFLAGS"
+  CXXFLAGS="$PTHREAD_CFLAGS $save_CXXFLAGS"
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for std::thread" >&5
 $as_echo_n "checking for std::thread... " >&6; }
 if ${gdb_cv_cxx_std_thread+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
-#include <thread>
-      void callback() { }
+  #if defined (__MINGW32__) || defined (__CYGWIN__)
+    # ifdef _WIN32_WINNT
+    #  if _WIN32_WINNT < 0x0501
+    #   undef _WIN32_WINNT
+    #   define _WIN32_WINNT 0x0501
+    #  endif
+    # else
+    #  define _WIN32_WINNT 0x0501
+    # endif
+    #endif	/* __MINGW32__ || __CYGWIN__ */
+    #include <thread>
+    void callback() { }
 int
 main ()
 {
@@ -8977,6 +8987,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $gdb_cv_cxx_std_thread" >&5
 $as_echo "$gdb_cv_cxx_std_thread" >&6; }
 
+  if test "$threads" = "yes"; then
     # This check must be here, while LIBS includes any necessary
     # threading library.
     for ac_func in pthread_sigmask pthread_setname_np
@@ -8991,10 +9002,9 @@ _ACEOF
 fi
 done
 
-
-    LIBS="$save_LIBS"
-    CXXFLAGS="$save_CXXFLAGS"
   fi
+  LIBS="$save_LIBS"
+  CXXFLAGS="$save_CXXFLAGS"
 
   if test "$want_threading" = "yes"; then
     if test "$gdb_cv_cxx_std_thread" = "yes"; then
@@ -10453,6 +10463,15 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
+# Set the 'development' global.
+. $srcdir/../bfd/development.sh
+
+if test "$development" = true ; then
+
+$as_echo "#define DEVELOPMENT 1" >>confdefs.h
+
+fi
+
 case ${host} in
   *mingw32*)
 
@@ -10460,6 +10479,9 @@ $as_echo "#define USE_WIN32API 1" >>confdefs.h
 
     ;;
 esac
+
+CONFIG_STATUS_DEPENDENCIES='$(srcdir)/../bfd/development.sh'
+
 
 ac_config_files="$ac_config_files Makefile"
 

@@ -1,6 +1,6 @@
 /* Header file for command creation.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -71,7 +71,7 @@ enum command_class
 };
 
 /* Types of "set" or "show" command.  */
-typedef enum var_types
+enum var_types
   {
     /* "on" or "off".  *VAR is a bool which is true for on,
        false for off.  */
@@ -120,8 +120,7 @@ typedef enum var_types
        *VAR is a char pointer to the name of the element that we
        find.  */
     var_enum
-  }
-var_types;
+  };
 
 /* Return true if a setting of type VAR_TYPE is backed with type T.
 

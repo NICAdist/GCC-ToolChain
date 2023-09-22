@@ -1,5 +1,5 @@
 /* Handle TIC6X (DSBT) shared libraries for GDB, the GNU Debugger.
-   Copyright (C) 2010-2022 Free Software Foundation, Inc.
+   Copyright (C) 2010-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -29,6 +29,7 @@
 #include "gdbcmd.h"
 #include "elf-bfd.h"
 #include "gdb_bfd.h"
+#include "solib-dsbt.h"
 
 #define GOT_MODULE_OFFSET 4
 
@@ -107,7 +108,7 @@ struct ext_elf32_dsbt_loadaddr
   ext_ptr map;			/* struct elf32_dsbt_loadmap *map; */
 };
 
-struct ext_link_map
+struct dbst_ext_link_map
 {
   struct ext_elf32_dsbt_loadaddr l_addr;
 
@@ -164,7 +165,7 @@ struct dsbt_info
 };
 
 /* Per-program-space data key.  */
-static program_space_key<dsbt_info> solib_dsbt_pspace_data;
+static const registry<program_space>::key<dsbt_info> solib_dsbt_pspace_data;
 
 /* Get the current dsbt data.  If none is found yet, add it now.  This
    function always returns a valid object.  */
@@ -188,23 +189,23 @@ dsbt_print_loadmap (struct int_elf32_dsbt_loadmap *map)
   int i;
 
   if (map == NULL)
-    printf_filtered ("(null)\n");
+    gdb_printf ("(null)\n");
   else if (map->version != 0)
-    printf_filtered (_("Unsupported map version: %d\n"), map->version);
+    gdb_printf (_("Unsupported map version: %d\n"), map->version);
   else
     {
-      printf_filtered ("version %d\n", map->version);
+      gdb_printf ("version %d\n", map->version);
 
       for (i = 0; i < map->nsegs; i++)
-	printf_filtered ("%s:%s -> %s:%s\n",
-			 print_core_address (target_gdbarch (),
-					     map->segs[i].p_vaddr),
-			 print_core_address (target_gdbarch (),
-					     map->segs[i].p_vaddr
-					     + map->segs[i].p_memsz),
-			 print_core_address (target_gdbarch (), map->segs[i].addr),
-			 print_core_address (target_gdbarch (), map->segs[i].addr
-					     + map->segs[i].p_memsz));
+	gdb_printf ("%s:%s -> %s:%s\n",
+		    print_core_address (target_gdbarch (),
+					map->segs[i].p_vaddr),
+		    print_core_address (target_gdbarch (),
+					map->segs[i].p_vaddr
+					+ map->segs[i].p_memsz),
+		    print_core_address (target_gdbarch (), map->segs[i].addr),
+		    print_core_address (target_gdbarch (), map->segs[i].addr
+					+ map->segs[i].p_memsz));
     }
 }
 
@@ -459,11 +460,11 @@ lm_base (void)
 
   if (got_sym.minsym != 0)
     {
-      addr = BMSYMBOL_VALUE_ADDRESS (got_sym);
+      addr = got_sym.value_address ();
       if (solib_dsbt_debug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "lm_base: get addr %x by _GLOBAL_OFFSET_TABLE_.\n",
-			    (unsigned int) addr);
+	gdb_printf (gdb_stdlog,
+		    "lm_base: get addr %x by _GLOBAL_OFFSET_TABLE_.\n",
+		    (unsigned int) addr);
     }
   else if (gdb_bfd_scan_elf_dyntag (DT_PLTGOT,
 				    current_program_space->exec_bfd (),
@@ -475,32 +476,32 @@ lm_base (void)
       ldm = info->exec_loadmap;
       addr += displacement_from_map (ldm, addr);
       if (solib_dsbt_debug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "lm_base: get addr %x by DT_PLTGOT.\n",
-			    (unsigned int) addr);
+	gdb_printf (gdb_stdlog,
+		    "lm_base: get addr %x by DT_PLTGOT.\n",
+		    (unsigned int) addr);
     }
   else
     {
       if (solib_dsbt_debug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "lm_base: _GLOBAL_OFFSET_TABLE_ not found.\n");
+	gdb_printf (gdb_stdlog,
+		    "lm_base: _GLOBAL_OFFSET_TABLE_ not found.\n");
       return 0;
     }
   addr += GOT_MODULE_OFFSET;
 
   if (solib_dsbt_debug)
-    fprintf_unfiltered (gdb_stdlog,
-			"lm_base: _GLOBAL_OFFSET_TABLE_ + %d = %s\n",
-			GOT_MODULE_OFFSET, hex_string_custom (addr, 8));
+    gdb_printf (gdb_stdlog,
+		"lm_base: _GLOBAL_OFFSET_TABLE_ + %d = %s\n",
+		GOT_MODULE_OFFSET, hex_string_custom (addr, 8));
 
   if (target_read_memory (addr, buf, sizeof buf) != 0)
     return 0;
   info->lm_base_cache = extract_unsigned_integer (buf, sizeof buf, byte_order);
 
   if (solib_dsbt_debug)
-    fprintf_unfiltered (gdb_stdlog,
-			"lm_base: lm_base_cache = %s\n",
-			hex_string_custom (info->lm_base_cache, 8));
+    gdb_printf (gdb_stdlog,
+		"lm_base: lm_base_cache = %s\n",
+		hex_string_custom (info->lm_base_cache, 8));
 
   return info->lm_base_cache;
 }
@@ -546,16 +547,16 @@ dsbt_current_sos (void)
      building the solist chain.  */
   while (lm_addr)
     {
-      struct ext_link_map lm_buf;
+      struct dbst_ext_link_map lm_buf;
       ext_Elf32_Word indexword;
       CORE_ADDR map_addr;
       int dsbt_index;
       int ret;
 
       if (solib_dsbt_debug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "current_sos: reading link_map entry at %s\n",
-			    hex_string_custom (lm_addr, 8));
+	gdb_printf (gdb_stdlog,
+		    "current_sos: reading link_map entry at %s\n",
+		    hex_string_custom (lm_addr, 8));
 
       ret = target_read_memory (lm_addr, (gdb_byte *) &lm_buf, sizeof (lm_buf));
       if (ret)
@@ -614,8 +615,8 @@ dsbt_current_sos (void)
 	  else
 	    {
 	      if (solib_dsbt_debug)
-		fprintf_unfiltered (gdb_stdlog, "current_sos: name = %s\n",
-				    name_buf.get ());
+		gdb_printf (gdb_stdlog, "current_sos: name = %s\n",
+			    name_buf.get ());
 
 	      strncpy (sop->so_name, name_buf.get (), SO_NAME_MAX_PATH_SIZE - 1);
 	      sop->so_name[SO_NAME_MAX_PATH_SIZE - 1] = '\0';
@@ -763,15 +764,15 @@ enable_break (void)
       if (addr != 0)
 	{
 	  if (solib_dsbt_debug)
-	    fprintf_unfiltered (gdb_stdlog,
-				"enable_break: _dl_debug_state (prior to relocation) = %s\n",
-				hex_string_custom (addr, 8));
+	    gdb_printf (gdb_stdlog,
+			"enable_break: _dl_debug_state (prior to relocation) = %s\n",
+			hex_string_custom (addr, 8));
 	  addr += displacement_from_map (ldm, addr);
 
 	  if (solib_dsbt_debug)
-	    fprintf_unfiltered (gdb_stdlog,
-				"enable_break: _dl_debug_state (after relocation) = %s\n",
-				hex_string_custom (addr, 8));
+	    gdb_printf (gdb_stdlog,
+			"enable_break: _dl_debug_state (after relocation) = %s\n",
+			hex_string_custom (addr, 8));
 
 	  /* Now (finally!) create the solib breakpoint.  */
 	  create_solib_event_breakpoint (target_gdbarch (), addr);
@@ -781,8 +782,8 @@ enable_break (void)
       else
 	{
 	  if (solib_dsbt_debug)
-	    fprintf_unfiltered (gdb_stdlog,
-				"enable_break: _dl_debug_state is not found\n");
+	    gdb_printf (gdb_stdlog,
+			"enable_break: _dl_debug_state is not found\n");
 	  ret = 0;
 	}
 
@@ -921,24 +922,26 @@ static void
 show_dsbt_debug (struct ui_file *file, int from_tty,
 		 struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("solib-dsbt debugging is %s.\n"), value);
+  gdb_printf (file, _("solib-dsbt debugging is %s.\n"), value);
 }
 
-struct target_so_ops dsbt_so_ops;
+const struct target_so_ops dsbt_so_ops =
+{
+  dsbt_relocate_section_addresses,
+  dsbt_free_so,
+  nullptr,
+  dsbt_clear_solib,
+  dsbt_solib_create_inferior_hook,
+  dsbt_current_sos,
+  open_symbol_file_object,
+  dsbt_in_dynsym_resolve_code,
+  solib_bfd_open,
+};
 
 void _initialize_dsbt_solib ();
 void
 _initialize_dsbt_solib ()
 {
-  dsbt_so_ops.relocate_section_addresses = dsbt_relocate_section_addresses;
-  dsbt_so_ops.free_so = dsbt_free_so;
-  dsbt_so_ops.clear_solib = dsbt_clear_solib;
-  dsbt_so_ops.solib_create_inferior_hook = dsbt_solib_create_inferior_hook;
-  dsbt_so_ops.current_sos = dsbt_current_sos;
-  dsbt_so_ops.open_symbol_file_object = open_symbol_file_object;
-  dsbt_so_ops.in_dynsym_resolve_code = dsbt_in_dynsym_resolve_code;
-  dsbt_so_ops.bfd_open = solib_bfd_open;
-
   /* Debug this file's internals.  */
   add_setshow_zuinteger_cmd ("solib-dsbt", class_maintenance,
 			     &solib_dsbt_debug, _("\

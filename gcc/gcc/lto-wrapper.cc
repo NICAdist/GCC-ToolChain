@@ -1,5 +1,5 @@
 /* Wrapper to call lto.  Used by collect2 and the linker plugin.
-   Copyright (C) 2009-2022 Free Software Foundation, Inc.
+   Copyright (C) 2009-2023 Free Software Foundation, Inc.
 
    Factored out of collect2 by Rafael Espindola <espindola@google.com>
 
@@ -89,6 +89,25 @@ static bool xassembler_options_error = false;
 
 const char tool_name[] = "lto-wrapper";
 
+/* Auxiliary function that frees elements of PTR and PTR itself.
+   N is number of elements to be freed.  If PTR is NULL, nothing is freed.
+   If an element is NULL, subsequent elements are not freed.  */
+
+static void **
+free_array_of_ptrs (void **ptr, unsigned n)
+{
+  if (!ptr)
+    return NULL;
+  for (unsigned i = 0; i < n; i++)
+    {
+      if (!ptr[i])
+	break;
+      free (ptr[i]);
+    }
+  free (ptr);
+  return NULL;
+}
+
 /* Delete tempfiles.  Called from utils_cleanup.  */
 
 void
@@ -113,6 +132,12 @@ tool_cleanup (bool)
       maybe_unlink (input_names[i]);
       if (output_names[i])
 	maybe_unlink (output_names[i]);
+    }
+  if (offload_names)
+    {
+      for (i = 0; offload_names[i]; i++)
+	maybe_unlink (offload_names[i]);
+      free_array_of_ptrs ((void **) offload_names, i);
     }
 }
 
@@ -310,6 +335,8 @@ merge_and_complain (vec<cl_decoded_option> &decoded_options,
 
 	case OPT_fopenmp:
 	case OPT_fopenacc:
+	case OPT_fasynchronous_unwind_tables:
+	case OPT_funwind_tables:
 	  /* For selected options we can merge conservatively.  */
 	  if (existing_opt == -1)
 	    decoded_options.safe_push (*foption);
@@ -626,25 +653,6 @@ merge_and_complain (vec<cl_decoded_option> &decoded_options,
       }
 }
 
-/* Auxiliary function that frees elements of PTR and PTR itself.
-   N is number of elements to be freed.  If PTR is NULL, nothing is freed.
-   If an element is NULL, subsequent elements are not freed.  */
-
-static void **
-free_array_of_ptrs (void **ptr, unsigned n)
-{
-  if (!ptr)
-    return NULL;
-  for (unsigned i = 0; i < n; i++)
-    {
-      if (!ptr[i])
-	break;
-      free (ptr[i]);
-    }
-  free (ptr);
-  return NULL;
-}
-
 /* Parse STR, saving found tokens into PVALUES and return their number.
    Tokens are assumed to be delimited by ':'.  If APPEND is non-null,
    append it to every token we find.  */
@@ -731,6 +739,8 @@ append_compiler_options (obstack *argv_obstack, vec<cl_decoded_option> opts)
 	case OPT_fopenacc_dim_:
 	case OPT_foffload_abi_:
 	case OPT_fcf_protection_:
+	case OPT_fasynchronous_unwind_tables:
+	case OPT_funwind_tables:
 	case OPT_g:
 	case OPT_O:
 	case OPT_Ofast:
@@ -908,13 +918,13 @@ access_check (const char *name, int mode)
 /* Prepare a target image for offload TARGET, using mkoffload tool from
    COMPILER_PATH.  Return the name of the resultant object file.  */
 
-static char *
+static const char *
 compile_offload_image (const char *target, const char *compiler_path,
 		       unsigned in_argc, char *in_argv[],
 		       vec<cl_decoded_option> compiler_opts,
-		       vec<cl_decoded_option> linker_opts)
+		       vec<cl_decoded_option> linker_opts,
+		       char **filename)
 {
-  char *filename = NULL;
   char *dumpbase;
   char **argv;
   char *suffix
@@ -922,6 +932,7 @@ compile_offload_image (const char *target, const char *compiler_path,
   strcpy (suffix, "/accel/");
   strcat (suffix, target);
   strcat (suffix, "/mkoffload");
+  *filename = NULL;
 
   char **paths = NULL;
   unsigned n_paths = parse_env_var (compiler_path, &paths, suffix);
@@ -950,9 +961,9 @@ compile_offload_image (const char *target, const char *compiler_path,
 
   /* Generate temporary output file name.  */
   if (save_temps)
-    filename = concat (dumpbase, ".o", NULL);
+    *filename = concat (dumpbase, ".o", NULL);
   else
-    filename = make_temp_file (".target.o");
+    *filename = make_temp_file (".target.o");
 
   struct obstack argv_obstack;
   obstack_init (&argv_obstack);
@@ -962,7 +973,7 @@ compile_offload_image (const char *target, const char *compiler_path,
   if (verbose)
     obstack_ptr_grow (&argv_obstack, "-v");
   obstack_ptr_grow (&argv_obstack, "-o");
-  obstack_ptr_grow (&argv_obstack, filename);
+  obstack_ptr_grow (&argv_obstack, *filename);
 
   /* Append names of input object files.  */
   for (unsigned i = 0; i < in_argc; i++)
@@ -986,7 +997,7 @@ compile_offload_image (const char *target, const char *compiler_path,
   obstack_free (&argv_obstack, NULL);
 
   free_array_of_ptrs ((void **) paths, n_paths);
-  return filename;
+  return *filename;
 }
 
 
@@ -1016,10 +1027,9 @@ compile_images_for_offload_targets (unsigned in_argc, char *in_argv[],
   offload_names = XCNEWVEC (char *, num_targets + 1);
   for (unsigned i = 0; i < num_targets; i++)
     {
-      offload_names[next_name_entry]
-	= compile_offload_image (names[i], compiler_path, in_argc, in_argv,
-				 compiler_opts, linker_opts);
-      if (!offload_names[next_name_entry])
+      if (!compile_offload_image (names[i], compiler_path, in_argc, in_argv,
+				  compiler_opts, linker_opts,
+				  &offload_names[next_name_entry]))
 #if OFFLOAD_DEFAULTED
 	continue;
 #else
@@ -1409,7 +1419,6 @@ run_gcc (unsigned argc, char *argv[])
   char **lto_argv, **ltoobj_argv;
   bool linker_output_rel = false;
   bool skip_debug = false;
-  unsigned n_debugobj;
   const char *incoming_dumppfx = dumppfx = NULL;
   static char current_dir[] = { '.', DIR_SEPARATOR, '\0' };
 
@@ -1789,6 +1798,7 @@ cont1:
 	  for (i = 0; offload_names[i]; i++)
 	    printf ("%s\n", offload_names[i]);
 	  free_array_of_ptrs ((void **) offload_names, i);
+	  offload_names = NULL;
 	}
     }
 
@@ -1867,7 +1877,6 @@ cont1:
 
   /* Copy the early generated debug info from the objects to temporary
      files and append those to the partial link commandline.  */
-  n_debugobj = 0;
   early_debug_object_names = NULL;
   if (! skip_debug)
     {
@@ -1877,10 +1886,7 @@ cont1:
 	{
 	  const char *tem;
 	  if ((tem = debug_objcopy (ltoobj_argv[i], !linker_output_rel)))
-	    {
-	      early_debug_object_names[i] = tem;
-	      n_debugobj++;
-	    }
+	    early_debug_object_names[i] = tem;
 	}
     }
 
@@ -2018,8 +2024,8 @@ cont:
 	         truncate them as soon as we have processed it.  This
 		 reduces temporary disk-space usage.  */
 	      if (! save_temps)
-		fprintf (mstream, "\t@-touch -r %s %s.tem > /dev/null 2>&1 "
-			 "&& mv %s.tem %s\n",
+		fprintf (mstream, "\t@-touch -r \"%s\" \"%s.tem\" > /dev/null "
+			 "2>&1 && mv \"%s.tem\" \"%s\"\n",
 			 input_name, input_name, input_name, input_name); 
 	    }
 	  else

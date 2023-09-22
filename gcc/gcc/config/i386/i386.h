@@ -1,5 +1,5 @@
 /* Definitions of target machine for GCC for IA-32.
-   Copyright (C) 1988-2022 Free Software Foundation, Inc.
+   Copyright (C) 1988-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -219,6 +219,11 @@ struct processor_costs {
   const char *const align_jump;		/* Jump alignment.  */
   const char *const align_label;	/* Label alignment.  */
   const char *const align_func;		/* Function alignment.  */
+
+  const unsigned small_unroll_ninsns;	/* Insn count limit for small loop
+					   to be unrolled.  */
+  const unsigned small_unroll_factor;   /* Unroll factor for small loop to
+					   be unrolled.  */
 };
 
 extern const struct processor_costs *ix86_cost;
@@ -1014,22 +1019,20 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
 #define VALID_AVX256_REG_MODE(MODE)					\
   ((MODE) == V32QImode || (MODE) == V16HImode || (MODE) == V8SImode	\
    || (MODE) == V4DImode || (MODE) == V2TImode || (MODE) == V8SFmode	\
-   || (MODE) == V4DFmode || (MODE) == V16HFmode)
+   || (MODE) == V4DFmode || (MODE) == V16HFmode || (MODE) == V16BFmode)
 
 #define VALID_AVX256_REG_OR_OI_MODE(MODE)		\
   (VALID_AVX256_REG_MODE (MODE) || (MODE) == OImode)
 
 #define VALID_AVX512F_SCALAR_MODE(MODE)					\
-  ((MODE) == DImode || (MODE) == DFmode || (MODE) == SImode		\
-   || (MODE) == SFmode)
-
-#define VALID_AVX512FP16_SCALAR_MODE(MODE)	\
-  ((MODE) == HImode || (MODE) == HFmode)
+  ((MODE) == DImode || (MODE) == DFmode					\
+   || (MODE) == SImode || (MODE) == SFmode				\
+   || (MODE) == HImode || (MODE) == HFmode || (MODE) == BFmode)
 
 #define VALID_AVX512F_REG_MODE(MODE)					\
   ((MODE) == V8DImode || (MODE) == V8DFmode || (MODE) == V64QImode	\
    || (MODE) == V16SImode || (MODE) == V16SFmode || (MODE) == V32HImode \
-   || (MODE) == V4TImode || (MODE) == V32HFmode)
+   || (MODE) == V4TImode || (MODE) == V32HFmode || (MODE) == V32BFmode)
 
 #define VALID_AVX512F_REG_OR_XI_MODE(MODE)				\
   (VALID_AVX512F_REG_MODE (MODE) || (MODE) == XImode)
@@ -1038,23 +1041,25 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
   ((MODE) == V2DImode || (MODE) == V2DFmode || (MODE) == V16QImode	\
    || (MODE) == V4SImode || (MODE) == V4SFmode || (MODE) == V8HImode	\
    || (MODE) == TFmode || (MODE) == V1TImode || (MODE) == V8HFmode	\
-   || (MODE) == TImode)
+   || (MODE) == V8BFmode || (MODE) == TImode)
 
 #define VALID_AVX512FP16_REG_MODE(MODE)					\
-  ((MODE) == V8HFmode || (MODE) == V16HFmode || (MODE) == V32HFmode	\
-   || (MODE) == V2HFmode)
+  ((MODE) == V8HFmode || (MODE) == V16HFmode || (MODE) == V32HFmode)
 
 #define VALID_SSE2_REG_MODE(MODE)					\
   ((MODE) == V16QImode || (MODE) == V8HImode || (MODE) == V2DFmode	\
    || (MODE) == V8HFmode || (MODE) == V4HFmode || (MODE) == V2HFmode	\
+   || (MODE) == V8BFmode || (MODE) == V4BFmode || (MODE) == V2BFmode	\
    || (MODE) == V4QImode || (MODE) == V2HImode || (MODE) == V1SImode	\
-   || (MODE) == V2DImode || (MODE) == V2QImode || (MODE) == DFmode	\
-   || (MODE) == HFmode)
+   || (MODE) == V2DImode || (MODE) == V2QImode				\
+   || (MODE) == DFmode	|| (MODE) == DImode				\
+   || (MODE) == HFmode || (MODE) == BFmode)
 
 #define VALID_SSE_REG_MODE(MODE)					\
   ((MODE) == V1TImode || (MODE) == TImode				\
    || (MODE) == V4SFmode || (MODE) == V4SImode				\
-   || (MODE) == SFmode || (MODE) == TFmode || (MODE) == TDmode)
+   || (MODE) == SFmode || (MODE) == SImode				\
+   || (MODE) == TFmode || (MODE) == TDmode)
 
 #define VALID_MMX_REG_MODE_3DNOW(MODE) \
   ((MODE) == V2SFmode || (MODE) == SFmode)
@@ -1064,7 +1069,7 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
   ((MODE) == V1DImode || (MODE) == DImode				\
    || (MODE) == V2SImode || (MODE) == SImode				\
    || (MODE) == V4HImode || (MODE) == V8QImode				\
-   || (MODE) == V4HFmode)
+   || (MODE) == V4HFmode || (MODE) == V4BFmode)
 
 #define VALID_MASK_REG_MODE(MODE) ((MODE) == HImode || (MODE) == QImode)
 
@@ -1080,8 +1085,8 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
    || (MODE) == CQImode || (MODE) == CHImode				\
    || (MODE) == CSImode || (MODE) == CDImode				\
    || (MODE) == SDmode || (MODE) == DDmode				\
-   || (MODE) == HFmode || (MODE) == HCmode				\
-   || (MODE) == V2HImode || (MODE) == V2HFmode				\
+   || (MODE) == HFmode || (MODE) == HCmode || (MODE) == BFmode		\
+   || (MODE) == V2HImode || (MODE) == V2HFmode || (MODE) == V2BFmode	\
    || (MODE) == V1SImode || (MODE) == V4QImode || (MODE) == V2QImode	\
    || (TARGET_64BIT							\
        && ((MODE) == TImode || (MODE) == CTImode			\
@@ -1098,8 +1103,9 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
    || (MODE) == V4DImode || (MODE) == V8SFmode || (MODE) == V4DFmode	\
    || (MODE) == V2TImode || (MODE) == V8DImode || (MODE) == V64QImode	\
    || (MODE) == V16SImode || (MODE) == V32HImode || (MODE) == V8DFmode	\
-   || (MODE) == V16SFmode || (MODE) == V32HFmode || (MODE) == V16HFmode \
-   || (MODE) == V8HFmode)
+   || (MODE) == V16SFmode \
+   || (MODE) == V32HFmode || (MODE) == V16HFmode || (MODE) == V8HFmode  \
+   || (MODE) == V32BFmode || (MODE) == V16BFmode || (MODE) == V8BFmode)
 
 #define X87_FLOAT_MODE_P(MODE)	\
   (TARGET_80387 && ((MODE) == SFmode || (MODE) == DFmode || (MODE) == XFmode))
@@ -1940,9 +1946,6 @@ do {							\
 
 #define SLOW_BYTE_ACCESS 0
 
-/* Nonzero if access to memory by shorts is slow and undesirable.  */
-#define SLOW_SHORT_ACCESS 0
-
 /* Define this macro if it is as good or better to call a constant
    function address than to call an address kept in a register.
 
@@ -2036,14 +2039,14 @@ do {							\
   { "zmm28", XMM28_REG }, { "zmm29", XMM29_REG }, { "zmm30", XMM30_REG }, { "zmm31", XMM31_REG }  \
 }
 
-/* How to renumber registers for dbx and gdb.  */
+/* How to renumber registers for gdb.  */
 
-#define DBX_REGISTER_NUMBER(N) \
-  (TARGET_64BIT ? dbx64_register_map[(N)] : dbx_register_map[(N)])
+#define DEBUGGER_REGNO(N) \
+  (TARGET_64BIT ? debugger64_register_map[(N)] : debugger_register_map[(N)])
 
-extern int const dbx_register_map[FIRST_PSEUDO_REGISTER];
-extern int const dbx64_register_map[FIRST_PSEUDO_REGISTER];
-extern int const svr4_dbx_register_map[FIRST_PSEUDO_REGISTER];
+extern int const debugger_register_map[FIRST_PSEUDO_REGISTER];
+extern int const debugger64_register_map[FIRST_PSEUDO_REGISTER];
+extern int const svr4_debugger_register_map[FIRST_PSEUDO_REGISTER];
 
 /* Before the prologue, RA is at 0(%esp).  */
 #define INCOMING_RETURN_ADDR_RTX \
@@ -2232,6 +2235,8 @@ enum processor_type
   PROCESSOR_GOLDMONT,
   PROCESSOR_GOLDMONT_PLUS,
   PROCESSOR_TREMONT,
+  PROCESSOR_SIERRAFOREST,
+  PROCESSOR_GRANDRIDGE,
   PROCESSOR_KNL,
   PROCESSOR_KNM,
   PROCESSOR_SKYLAKE,
@@ -2245,7 +2250,9 @@ enum processor_type
   PROCESSOR_SAPPHIRERAPIDS,
   PROCESSOR_ALDERLAKE,
   PROCESSOR_ROCKETLAKE,
+  PROCESSOR_GRANITERAPIDS,
   PROCESSOR_INTEL,
+  PROCESSOR_LUJIAZUI,
   PROCESSOR_GEODE,
   PROCESSOR_K6,
   PROCESSOR_ATHLON,
@@ -2351,6 +2358,13 @@ constexpr wide_int_bitmask PTA_ALDERLAKE = PTA_TREMONT | PTA_ADX | PTA_AVX
   | PTA_AVX2 | PTA_BMI | PTA_BMI2 | PTA_F16C | PTA_FMA | PTA_LZCNT
   | PTA_PCONFIG | PTA_PKU | PTA_VAES | PTA_VPCLMULQDQ | PTA_SERIALIZE
   | PTA_HRESET | PTA_KL | PTA_WIDEKL | PTA_AVXVNNI;
+constexpr wide_int_bitmask PTA_SIERRAFOREST = PTA_ALDERLAKE | PTA_AVXIFMA
+  | PTA_AVXVNNIINT8 | PTA_AVXNECONVERT | PTA_CMPCCXADD | PTA_ENQCMD | PTA_UINTR;
+constexpr wide_int_bitmask PTA_GRANITERAPIDS = PTA_SAPPHIRERAPIDS | PTA_AMX_FP16
+  | PTA_PREFETCHI;
+constexpr wide_int_bitmask PTA_GRANITERAPIDS_D = PTA_GRANITERAPIDS
+  | PTA_AMX_COMPLEX;
+constexpr wide_int_bitmask PTA_GRANDRIDGE = PTA_SIERRAFOREST | PTA_RAOINT;
 constexpr wide_int_bitmask PTA_KNM = PTA_KNL | PTA_AVX5124VNNIW
   | PTA_AVX5124FMAPS | PTA_AVX512VPOPCNTDQ;
 constexpr wide_int_bitmask PTA_ZNVER1 = PTA_64BIT | PTA_MMX | PTA_SSE | PTA_SSE2

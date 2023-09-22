@@ -1,5 +1,5 @@
 /* Definitions of target machine for GNU compiler.  LoongArch version.
-   Copyright (C) 2021-2022 Free Software Foundation, Inc.
+   Copyright (C) 2021-2023 Free Software Foundation, Inc.
    Contributed by Loongson Ltd.
    Based on MIPS and RISC-V target for GNU compiler.
 
@@ -617,7 +617,7 @@ enum reg_class
 #define LU12I_INT(X) LU12I_OPERAND (INTVAL (X))
 #define LU32I_INT(X) LU32I_OPERAND (INTVAL (X))
 #define LU52I_INT(X) LU52I_OPERAND (INTVAL (X))
-#define LARCH_U12BIT_OFFSET_P(OFFSET) (IN_RANGE (OFFSET, -2048, 2047))
+#define LARCH_12BIT_OFFSET_P(OFFSET) (IN_RANGE (OFFSET, -2048, 2047))
 #define LARCH_9BIT_OFFSET_P(OFFSET) (IN_RANGE (OFFSET, -256, 255))
 #define LARCH_16BIT_OFFSET_P(OFFSET) (IN_RANGE (OFFSET, -32768, 32767))
 #define LARCH_SHIFT_2_OFFSET_P(OFFSET) (((OFFSET) & 0x3) == 0)
@@ -667,6 +667,10 @@ enum reg_class
 #define OUTGOING_REG_PARM_STACK_SPACE(FNTYPE) 1
 
 #define STACK_BOUNDARY (TARGET_ABI_LP64 ? 128 : 64)
+
+/* This value controls how many pages we manually unroll the loop for when
+   generating stack clash probes.  */
+#define STACK_CLASH_MAX_UNROLL_PAGES 4
 
 /* Symbolic macros for the registers used to return integer and floating
    point values.  */
@@ -1130,8 +1134,13 @@ struct GTY (()) machine_function
 };
 #endif
 
+#ifdef HAVE_AS_EH_FRAME_PCREL_ENCODING_SUPPORT
+#define ASM_PREFERRED_EH_DATA_FORMAT(CODE, GLOBAL) \
+  (((GLOBAL) ? DW_EH_PE_indirect : 0) | DW_EH_PE_pcrel | DW_EH_PE_sdata4)
+#else
 #define ASM_PREFERRED_EH_DATA_FORMAT(CODE, GLOBAL) \
   (((GLOBAL) ? DW_EH_PE_indirect : 0) | DW_EH_PE_absptr)
+#endif
 
 /* Do emit .note.GNU-stack by default.  */
 #ifndef NEED_INDICATE_EXEC_STACK

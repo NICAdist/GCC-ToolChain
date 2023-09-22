@@ -1,5 +1,5 @@
 /* Maintain binary trees of symbols.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Andy Vaught
 
 This file is part of GCC.
@@ -4081,7 +4081,13 @@ gfc_free_namespace (gfc_namespace *&ns)
       f = f->next;
       free (current);
     }
-
+  if (ns->omp_assumes)
+    {
+      free (ns->omp_assumes->absent);
+      free (ns->omp_assumes->contains);
+      gfc_free_expr_list (ns->omp_assumes->holds);
+      free (ns->omp_assumes);
+    }
   p = ns->contained;
   free (ns);
   ns = NULL;
@@ -4718,6 +4724,13 @@ gfc_copy_formal_args_intr (gfc_symbol *dest, gfc_intrinsic_sym *src,
       formal_arg->sym->attr.intent = curr_arg->intent;
       formal_arg->sym->attr.flavor = FL_VARIABLE;
       formal_arg->sym->attr.dummy = 1;
+
+      /* Do not treat an actual deferred-length character argument wrongly
+	 as template for the formal argument.  */
+      if (formal_arg->sym->ts.type == BT_CHARACTER
+	  && !(formal_arg->sym->attr.allocatable
+	       || formal_arg->sym->attr.pointer))
+	formal_arg->sym->ts.deferred = false;
 
       if (formal_arg->sym->ts.type == BT_CHARACTER)
 	formal_arg->sym->ts.u.cl = gfc_new_charlen (gfc_current_ns, NULL);

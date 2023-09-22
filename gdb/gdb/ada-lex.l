@@ -1,5 +1,5 @@
 /* FLEX lexer for Ada expressions, for GDB. -*- c++ -*-
-   Copyright (C) 1994-2022 Free Software Foundation, Inc.
+   Copyright (C) 1994-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -39,6 +39,11 @@ OPER    ([-+*/=<>&]|"<="|">="|"**"|"/="|"and"|"or"|"xor"|"not"|"mod"|"rem"|"abs"
 EXP	(e[+-]{NUM10})
 POSEXP  (e"+"?{NUM10})
 
+/* This must agree with COMPLETION_CHAR below.  See the comment there
+   for the explanation.  */
+COMPLETE "\001"
+NOT_COMPLETE [^\001]
+
 %{
 
 #include "diagnostics.h"
@@ -73,18 +78,35 @@ static void rewind_to_char (int);
    Defining YY_NO_INPUT comments it out.  */
 #define YY_NO_INPUT
 
-#undef YY_INPUT
-#define YY_INPUT(BUF, RESULT, MAX_SIZE) \
-    if ( *pstate->lexptr == '\000' ) \
-      (RESULT) = YY_NULL; \
-    else \
-      { \
-        *(BUF) = *pstate->lexptr; \
-        (RESULT) = 1; \
-	pstate->lexptr += 1; \
-      }
+/* When completing, we'll return a special character at the end of the
+   input, to signal the completion position to the lexer.  This is
+   done because flex does not have a generally useful way to detect
+   EOF in a pattern.  This variable records whether the special
+   character has been emitted.  */
+static bool returned_complete = false;
 
-static int find_dot_all (const char *);
+/* The character we use to represent the completion point.  */
+#define COMPLETE_CHAR '\001'
+
+#undef YY_INPUT
+#define YY_INPUT(BUF, RESULT, MAX_SIZE)					\
+  if ( *pstate->lexptr == '\000' )					\
+    {									\
+      if (pstate->parse_completion && !returned_complete)		\
+	{								\
+	  returned_complete = true;					\
+	  *(BUF) = COMPLETE_CHAR;					\
+	  (RESULT) = 1;							\
+	}								\
+      else								\
+	(RESULT) = YY_NULL;						\
+    }									\
+  else									\
+    {									\
+      *(BUF) = *pstate->lexptr == COMPLETE_CHAR ? ' ' : *pstate->lexptr; \
+      (RESULT) = 1;							\
+      pstate->lexptr += 1;						\
+    }
 
 /* Depth of parentheses.  */
 static int paren_depth;
@@ -227,7 +249,7 @@ false		{ return FALSEKEYWORD; }
 
         /* ATTRIBUTES */
 
-{TICK}[a-z][a-z_]+ { BEGIN INITIAL; return processAttribute (yytext+1); }
+{TICK}([a-z][a-z_]*)?{COMPLETE}? { BEGIN INITIAL; return processAttribute (yytext); }
 
 	/* PUNCTUATION */
 
@@ -239,9 +261,9 @@ false		{ return FALSEKEYWORD; }
 "<="		{ return LEQ; }
 ">="		{ return GEQ; }
 
-<BEFORE_QUAL_QUOTE>"'" { BEGIN INITIAL; return '\''; }
+<BEFORE_QUAL_QUOTE>"'"/{NOT_COMPLETE} { BEGIN INITIAL; return '\''; }
 
-[-&*+./:<>=|;\[\]] { return yytext[0]; }
+[-&*+{}@/:<>=|;\[\]] { return yytext[0]; }
 
 ","		{ if (paren_depth == 0 && pstate->comma_terminates)
 		    {
@@ -265,14 +287,20 @@ false		{ return FALSEKEYWORD; }
 		    }
 		}
 
-"."{WHITE}*all  { return DOT_ALL; }
-
-"."{WHITE}*{ID} {
+"."{WHITE}*{ID}{COMPLETE}? {
 	 	  yylval.sval = processId (yytext+1, yyleng-1);
+		  if (yytext[yyleng - 1] == COMPLETE_CHAR)
+		    return DOT_COMPLETE;
 	          return DOT_ID;
 		}
 
-{ID}({WHITE}*"."{WHITE}*({ID}|\"{OPER}\"))*(" "*"'")?  {
+"."{WHITE}*{COMPLETE} {
+		  yylval.sval.ptr = "";
+		  yylval.sval.length = 0;
+		  return DOT_COMPLETE;
+		}
+
+{ID}({WHITE}*"."{WHITE}*({ID}|\"{OPER}\"))*(" "*"'"|{COMPLETE})?  {
                   int all_posn = find_dot_all (yytext);
 
                   if (all_posn == -1 && yytext[yyleng-1] == '\'')
@@ -282,8 +310,9 @@ false		{ return FALSEKEYWORD; }
 		    }
                   else if (all_posn >= 0)
 		    yyless (all_posn);
+		  bool is_completion = yytext[yyleng - 1] == COMPLETE_CHAR;
                   yylval.sval = processId (yytext, yyleng);
-                  return NAME;
+                  return is_completion ? NAME_COMPLETE : NAME;
                }
 
 
@@ -296,8 +325,6 @@ false		{ return FALSEKEYWORD; }
 		}
 
 "::"            { return COLONCOLON; }
-
-[{}@]		{ return yytext[0]; }
 
 	/* REGISTERS AND GDB CONVENIENCE VARIABLES */
 
@@ -320,6 +347,7 @@ lexer_init (FILE *inp)
 {
   BEGIN INITIAL;
   paren_depth = 0;
+  returned_complete = false;
   yyrestart (inp);
 }
 
@@ -427,7 +455,7 @@ processInt (struct parser_state *par_state, const char *base0,
 
       yylval.typed_val_float.type = fp_type;
       result.write (gdb::make_array_view (yylval.typed_val_float.val,
-					  TYPE_LENGTH (fp_type)),
+					  fp_type->length ()),
 		    type_byte_order (fp_type),
 		    true);
 
@@ -438,12 +466,16 @@ processInt (struct parser_state *par_state, const char *base0,
   if (mpz_cmp (result.val, maxval.val) > 0)
     error (_("Integer literal out of range"));
 
+  int int_bits = gdbarch_int_bit (par_state->gdbarch ());
+  int long_bits = gdbarch_long_bit (par_state->gdbarch ());
+  int long_long_bits = gdbarch_long_long_bit (par_state->gdbarch ());
+
   ULONGEST value = result.as_integer<ULONGEST> ();
-  if ((value >> (gdbarch_int_bit (par_state->gdbarch ())-1)) == 0)
+  if (fits_in_type (1, value, int_bits, true))
     yylval.typed_val.type = type_int (par_state);
-  else if ((value >> (gdbarch_long_bit (par_state->gdbarch ())-1)) == 0)
+  else if (fits_in_type (1, value, long_bits, true))
     yylval.typed_val.type = type_long (par_state);
-  else if (((value >> (gdbarch_long_bit (par_state->gdbarch ())-1)) >> 1) == 0)
+  else if (fits_in_type (1, value, long_bits, false))
     {
       /* We have a number representable as an unsigned integer quantity.
          For consistency with the C treatment, we will treat it as an
@@ -462,8 +494,23 @@ processInt (struct parser_state *par_state, const char *base0,
 	yylval.typed_val.val = (LONGEST) value;
       return INT;
     }
-  else
+  else if (fits_in_type (1, value, long_long_bits, true))
     yylval.typed_val.type = type_long_long (par_state);
+  else if (fits_in_type (1, value, long_long_bits, false))
+    {
+      yylval.typed_val.type
+	= builtin_type (par_state->gdbarch ())->builtin_unsigned_long_long;
+      /* See unsigned long case above.  */
+      if (value & LONGEST_SIGN)
+	yylval.typed_val.val =
+	  (LONGEST) (value & ~LONGEST_SIGN)
+	  - (LONGEST_SIGN>>1) - (LONGEST_SIGN>>1);
+      else
+	yylval.typed_val.val = (LONGEST) value;
+      return INT;
+    }
+  else
+    error (_("Integer literal out of range"));
 
   yylval.typed_val.val = value;
   return INT;
@@ -516,33 +563,33 @@ processId (const char *name0, int len)
       return result;
     }
 
+  bool in_quotes = false;
   i = i0 = 0;
   while (i0 < len)
     {
-      if (isalnum (name0[i0]))
+      if (name0[i0] == COMPLETE_CHAR)
+	{
+	  /* Just ignore.  */
+	  ++i0;
+	}
+      else if (in_quotes)
+	name[i++] = name0[i0++];
+      else if (isalnum (name0[i0]))
 	{
 	  name[i] = tolower (name0[i0]);
 	  i += 1; i0 += 1;
 	}
-      else switch (name0[i0])
+      else if (isspace (name0[i0]))
+	i0 += 1;
+      else if (name0[i0] == '\'')
 	{
-	default:
-	  name[i] = name0[i0];
-	  i += 1; i0 += 1;
-	  break;
-	case ' ': case '\t':
-	  i0 += 1;
-	  break;
-	case '\'':
-	  do
-	    {
-	      name[i] = name0[i0];
-	      i += 1; i0 += 1;
-	    }
-	  while (i0 < len && name0[i0] != '\'');
-	  i0 += 1;
-	  break;
+	  /* Copy the starting quote, but not the ending quote.  */
+	  if (!in_quotes)
+	    name[i++] = name0[i0++];
+	  in_quotes = !in_quotes;
 	}
+      else
+	name[i++] = name0[i0++];
     }
   name[i] = '\000';
 
@@ -655,7 +702,6 @@ attributes[] = {
   { "size", TICK_SIZE },
   { "tag", TICK_TAG },
   { "val", TICK_VAL },
-  { NULL, -1 }
 };
 
 /* Return the syntactic code corresponding to the attribute name or
@@ -664,24 +710,52 @@ attributes[] = {
 static int
 processAttribute (const char *str)
 {
-  int i, k;
+  gdb_assert (*str == '\'');
+  ++str;
+  while (isspace (*str))
+    ++str;
 
-  for (i = 0; attributes[i].code != -1; i += 1)
-    if (strcasecmp (str, attributes[i].name) == 0)
-      return attributes[i].code;
+  int len = strlen (str);
+  if (len > 0 && str[len - 1] == COMPLETE_CHAR)
+    {
+      /* This is enforced by YY_INPUT.  */
+      gdb_assert (pstate->parse_completion);
+      yylval.sval.ptr = obstack_strndup (&temp_parse_space, str, len - 1);
+      yylval.sval.length = len - 1;
+      return TICK_COMPLETE;
+    }
 
-  for (i = 0, k = -1; attributes[i].code != -1; i += 1)
-    if (subseqMatch (str, attributes[i].name))
+  for (const auto &item : attributes)
+    if (strcasecmp (str, item.name) == 0)
+      return item.code;
+
+  gdb::optional<int> found;
+  for (const auto &item : attributes)
+    if (subseqMatch (str, item.name))
       {
-	if (k == -1)
-	  k = i;
+	if (!found.has_value ())
+	  found = item.code;
 	else
 	  error (_("ambiguous attribute name: `%s'"), str);
       }
-  if (k == -1)
+  if (!found.has_value ())
     error (_("unrecognized attribute: `%s'"), str);
 
-  return attributes[k].code;
+  return *found;
+}
+
+bool
+ada_tick_completer::complete (struct expression *exp,
+			      completion_tracker &tracker)
+{
+  completion_list output;
+  for (const auto &item : attributes)
+    {
+      if (strncasecmp (item.name, m_name.c_str (), m_name.length ()) == 0)
+	output.emplace_back (xstrdup (item.name));
+    }
+  tracker.add_completions (std::move (output));
+  return true;
 }
 
 /* Back up lexptr by yyleng and then to the rightmost occurrence of

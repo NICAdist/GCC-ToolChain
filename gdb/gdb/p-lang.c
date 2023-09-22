@@ -1,6 +1,6 @@
 /* Pascal language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -104,11 +104,11 @@ pascal_is_string_type (struct type *type,int *length_pos, int *length_size,
 	  if (length_pos)
 	    *length_pos = type->field (0).loc_bitpos () / TARGET_CHAR_BIT;
 	  if (length_size)
-	    *length_size = TYPE_LENGTH (type->field (0).type ());
+	    *length_size = type->field (0).type ()->length ();
 	  if (string_pos)
 	    *string_pos = type->field (1).loc_bitpos () / TARGET_CHAR_BIT;
 	  if (char_type)
-	    *char_type = TYPE_TARGET_TYPE (type->field (1).type ());
+	    *char_type = type->field (1).type ()->target_type ();
 	  if (arrayname)
 	    *arrayname = type->field (1).name ();
 	 return 2;
@@ -124,16 +124,16 @@ pascal_is_string_type (struct type *type,int *length_pos, int *length_size,
 	  if (length_pos)
 	    *length_pos = type->field (1).loc_bitpos () / TARGET_CHAR_BIT;
 	  if (length_size)
-	    *length_size = TYPE_LENGTH (type->field (1).type ());
+	    *length_size = type->field (1).type ()->length ();
 	  if (string_pos)
 	    *string_pos = type->field (2).loc_bitpos () / TARGET_CHAR_BIT;
 	  /* FIXME: how can I detect wide chars in GPC ??  */
 	  if (char_type)
 	    {
-	      *char_type = TYPE_TARGET_TYPE (type->field (2).type ());
+	      *char_type = type->field (2).type ()->target_type ();
 
 	      if ((*char_type)->code () == TYPE_CODE_ARRAY)
-		*char_type = TYPE_TARGET_TYPE (*char_type);
+		*char_type = (*char_type)->target_type ();
 	    }
 	  if (arrayname)
 	    *arrayname = type->field (2).name ();
@@ -152,21 +152,21 @@ pascal_language::print_one_char (int c, struct ui_file *stream,
   if (c == '\'' || ((unsigned int) c <= 0xff && (PRINT_LITERAL_FORM (c))))
     {
       if (!(*in_quotes))
-	fputs_filtered ("'", stream);
+	gdb_puts ("'", stream);
       *in_quotes = 1;
       if (c == '\'')
 	{
-	  fputs_filtered ("''", stream);
+	  gdb_puts ("''", stream);
 	}
       else
-	fprintf_filtered (stream, "%c", c);
+	gdb_printf (stream, "%c", c);
     }
   else
     {
       if (*in_quotes)
-	fputs_filtered ("'", stream);
+	gdb_puts ("'", stream);
       *in_quotes = 0;
-      fprintf_filtered (stream, "#%d", (unsigned int) c);
+      gdb_printf (stream, "#%d", (unsigned int) c);
     }
 }
 
@@ -180,7 +180,7 @@ pascal_language::printchar (int c, struct type *type,
 
   print_one_char (c, stream, &in_quotes);
   if (in_quotes)
-    fputs_filtered ("'", stream);
+    gdb_puts ("'", stream);
 }
 
 
@@ -237,7 +237,7 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 
   /* Preserve ELTTYPE's original type, just set its LENGTH.  */
   check_typedef (elttype);
-  width = TYPE_LENGTH (elttype);
+  width = elttype->length ();
 
   /* If the string was not truncated due to `set print elements', and
      the last byte of it is a null, we don't print that, in traditional C
@@ -249,7 +249,7 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 
   if (length == 0)
     {
-      fputs_filtered ("''", stream);
+      gdb_puts ("''", stream);
       return;
     }
 
@@ -266,7 +266,7 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 
       if (need_comma)
 	{
-	  fputs_filtered (", ", stream);
+	  gdb_puts (", ", stream);
 	  need_comma = 0;
 	}
 
@@ -287,13 +287,13 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 	{
 	  if (in_quotes)
 	    {
-	      fputs_filtered ("', ", stream);
+	      gdb_puts ("', ", stream);
 	      in_quotes = 0;
 	    }
 	  printchar (current_char, elttype, stream);
-	  fprintf_filtered (stream, " %p[<repeats %u times>%p]",
-			    metadata_style.style ().ptr (),
-			    reps, nullptr);
+	  gdb_printf (stream, " %p[<repeats %u times>%p]",
+		      metadata_style.style ().ptr (),
+		      reps, nullptr);
 	  i = rep1 - 1;
 	  things_printed += options->repeat_count_threshold;
 	  need_comma = 1;
@@ -302,7 +302,7 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 	{
 	  if ((!in_quotes) && (PRINT_LITERAL_FORM (current_char)))
 	    {
-	      fputs_filtered ("'", stream);
+	      gdb_puts ("'", stream);
 	      in_quotes = 1;
 	    }
 	  print_one_char (current_char, stream, &in_quotes);
@@ -312,10 +312,10 @@ pascal_language::printstr (struct ui_file *stream, struct type *elttype,
 
   /* Terminate the quotes if necessary.  */
   if (in_quotes)
-    fputs_filtered ("'", stream);
+    gdb_puts ("'", stream);
 
   if (force_ellipses || i < length)
-    fputs_filtered ("...", stream);
+    gdb_puts ("...", stream);
 }
 
 /* Single instance of the Pascal language class.  */

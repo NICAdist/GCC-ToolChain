@@ -1,5 +1,5 @@
 /* Deal with interfaces.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Andy Vaught
 
 This file is part of GCC.
@@ -1334,6 +1334,12 @@ gfc_check_dummy_characteristics (gfc_symbol *s1, gfc_symbol *s2,
   if (s1 == NULL || s2 == NULL)
     return s1 == s2 ? true : false;
 
+  if (s1->attr.proc == PROC_ST_FUNCTION || s2->attr.proc == PROC_ST_FUNCTION)
+    {
+      strncpy (errmsg, "Statement function", err_len);
+      return false;
+    }
+
   /* Check type and rank.  */
   if (type_must_agree)
     {
@@ -2343,6 +2349,7 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
   char err[200];
   gfc_component *ppc;
   bool codimension = false;
+  gfc_array_spec *formal_as;
 
   /* If the formal arg has type BT_VOID, it's to one of the iso_c_binding
      procs c_f_pointer or c_f_procpointer, and we need to accept most
@@ -2550,6 +2557,9 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
       return false;
     }
 
+  formal_as = (formal->ts.type == BT_CLASS
+	       ? CLASS_DATA (formal)->as : formal->as);
+
   if (codimension && formal->attr.allocatable)
     {
       gfc_ref *last = NULL;
@@ -2660,10 +2670,10 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
   if (symbol_rank (formal) == actual->rank || symbol_rank (formal) == -1)
     return true;
 
-  rank_check = where != NULL && !is_elemental && formal->as
-	       && (formal->as->type == AS_ASSUMED_SHAPE
-		   || formal->as->type == AS_DEFERRED)
-	       && actual->expr_type != EXPR_NULL;
+  rank_check = where != NULL && !is_elemental && formal_as
+    && (formal_as->type == AS_ASSUMED_SHAPE
+	|| formal_as->type == AS_DEFERRED)
+    && actual->expr_type != EXPR_NULL;
 
   /* Skip rank checks for NO_ARG_CHECK.  */
   if (formal->attr.ext_attr & (1 << EXT_ATTR_NO_ARG_CHECK))
@@ -2672,14 +2682,20 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
   /* Scalar & coindexed, see: F2008, Section 12.5.2.4.  */
   if (rank_check || ranks_must_agree
       || (formal->attr.pointer && actual->expr_type != EXPR_NULL)
-      || (actual->rank != 0 && !(is_elemental || formal->attr.dimension))
+      || (actual->rank != 0
+	  && !(is_elemental || formal->attr.dimension
+	       || (formal->ts.type == BT_CLASS
+		   && CLASS_DATA (formal)->attr.dimension)))
       || (actual->rank == 0
 	  && ((formal->ts.type == BT_CLASS
 	       && CLASS_DATA (formal)->as->type == AS_ASSUMED_SHAPE)
 	      || (formal->ts.type != BT_CLASS
 		   && formal->as->type == AS_ASSUMED_SHAPE))
 	  && actual->expr_type != EXPR_NULL)
-      || (actual->rank == 0 && formal->attr.dimension
+      || (actual->rank == 0
+	  && (formal->attr.dimension
+	      || (formal->ts.type == BT_CLASS
+		  && CLASS_DATA (formal)->attr.dimension))
 	  && gfc_is_coindexed (actual))
       /* Assumed-rank actual argument; F2018 C838.  */
       || actual->rank == -1)
@@ -2700,7 +2716,10 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
 	}
       return false;
     }
-  else if (actual->rank != 0 && (is_elemental || formal->attr.dimension))
+  else if (actual->rank != 0
+	   && (is_elemental || formal->attr.dimension
+	       || (formal->ts.type == BT_CLASS
+		   && CLASS_DATA (formal)->attr.dimension)))
     return true;
 
   /* At this point, we are considering a scalar passed to an array.   This
@@ -2708,7 +2727,8 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
      - if the actual argument is (a substring of) an element of a
        non-assumed-shape/non-pointer/non-polymorphic array; or
      - (F2003) if the actual argument is of type character of default/c_char
-       kind.  */
+       kind.
+     - (F2018) if the dummy argument is type(*).  */
 
   is_pointer = actual->expr_type == EXPR_VARIABLE
 	       ? actual->symtree->n.sym->attr.pointer : false;
@@ -2775,6 +2795,14 @@ compare_parameter (gfc_symbol *formal, gfc_expr *actual,
 
   if (ref == NULL && actual->expr_type != EXPR_NULL)
     {
+      if (actual->rank == 0
+	  && formal->ts.type == BT_ASSUMED
+	  && formal->as
+	  && formal->as->type == AS_ASSUMED_SIZE)
+	/* This is new in F2018, type(*) is new in TS29113, but gfortran does
+	   not differentiate.  Thus, if type(*) exists, it is valid;
+	   otherwise, type(*) is already rejected.  */
+	return true;
       if (where
 	  && (!formal->attr.artificial || (!formal->maybe_array
 					   && !maybe_dummy_array_arg (actual))))
@@ -3290,9 +3318,11 @@ gfc_compare_actual_formal (gfc_actual_arglist **ap, gfc_formal_arglist *formal,
       if (a->expr->ts.type == BT_CHARACTER
 	  && a->expr->ts.u.cl && a->expr->ts.u.cl->length
 	  && a->expr->ts.u.cl->length->expr_type == EXPR_CONSTANT
+	  && a->expr->ts.u.cl->length->ts.type == BT_INTEGER
 	  && f->sym->ts.type == BT_CHARACTER && f->sym->ts.u.cl
 	  && f->sym->ts.u.cl->length
 	  && f->sym->ts.u.cl->length->expr_type == EXPR_CONSTANT
+	  && f->sym->ts.u.cl->length->ts.type == BT_INTEGER
 	  && (f->sym->attr.pointer || f->sym->attr.allocatable
 	      || (f->sym->as && f->sym->as->type == AS_ASSUMED_SHAPE))
 	  && (mpz_cmp (a->expr->ts.u.cl->length->value.integer,
@@ -3494,25 +3524,39 @@ gfc_compare_actual_formal (gfc_actual_arglist **ap, gfc_formal_arglist *formal,
 	  goto match;
 	}
 
-      if (a->expr->expr_type != EXPR_NULL
-	  && compare_pointer (f->sym, a->expr) == 0)
+      if (a->expr->expr_type != EXPR_NULL)
 	{
-	  if (where)
-	    gfc_error ("Actual argument for %qs must be a pointer at %L",
-		       f->sym->name, &a->expr->where);
-	  ok = false;
-	  goto match;
-	}
+	  int cmp = compare_pointer (f->sym, a->expr);
+	  bool pre2008 = ((gfc_option.allow_std & GFC_STD_F2008) == 0);
 
-      if (a->expr->expr_type != EXPR_NULL
-	  && (gfc_option.allow_std & GFC_STD_F2008) == 0
-	  && compare_pointer (f->sym, a->expr) == 2)
-	{
-	  if (where)
-	    gfc_error ("Fortran 2008: Non-pointer actual argument at %L to "
-		       "pointer dummy %qs", &a->expr->where,f->sym->name);
-	  ok = false;
-	  goto match;
+	  if (pre2008 && cmp == 0)
+	    {
+	      if (where)
+		gfc_error ("Actual argument for %qs at %L must be a pointer",
+			   f->sym->name, &a->expr->where);
+	      ok = false;
+	      goto match;
+	    }
+
+	  if (pre2008 && cmp == 2)
+	    {
+	      if (where)
+		gfc_error ("Fortran 2008: Non-pointer actual argument at %L to "
+			   "pointer dummy %qs", &a->expr->where, f->sym->name);
+	      ok = false;
+	      goto match;
+	    }
+
+	  if (!pre2008 && cmp == 0)
+	    {
+	      if (where)
+		gfc_error ("Actual argument for %qs at %L must be a pointer "
+			   "or a valid target for the dummy pointer in a "
+			   "pointer assignment statement",
+			   f->sym->name, &a->expr->where);
+	      ok = false;
+	      goto match;
+	    }
 	}
 
 

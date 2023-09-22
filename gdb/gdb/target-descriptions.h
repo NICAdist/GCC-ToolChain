@@ -1,6 +1,6 @@
 /* Target description support for GDB.
 
-   Copyright (C) 2006-2022 Free Software Foundation, Inc.
+   Copyright (C) 2006-2023 Free Software Foundation, Inc.
 
    Contributed by CodeSourcery.
 
@@ -170,6 +170,10 @@ int tdesc_numbered_register_choices (const struct tdesc_feature *feature,
 				     struct tdesc_arch_data *data,
 				     int regno, const char *const names[]);
 
+/* Return true if DATA contains an entry for REGNO, a GDB register
+   number.  */
+
+extern bool tdesc_found_register (struct tdesc_arch_data *data, int regno);
 
 /* Accessors for target descriptions.  */
 
@@ -229,7 +233,7 @@ struct type *tdesc_find_type (struct gdbarch *gdbarch, const char *id);
    specify a group.  */
 
 int tdesc_register_in_reggroup_p (struct gdbarch *gdbarch, int regno,
-				  struct reggroup *reggroup);
+				  const struct reggroup *reggroup);
 
 /* Methods for constructing a target description.  */
 

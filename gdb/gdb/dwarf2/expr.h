@@ -1,6 +1,6 @@
 /* DWARF 2 Expression Evaluator.
 
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
    Contributed by Daniel Berlin <dan@dberlin.org>.
 
@@ -137,7 +137,7 @@ struct dwarf_expr_context
      The ADDR_INFO property can be specified to override the range of
      memory addresses with the passed in buffer.  */
   value *evaluate (const gdb_byte *addr, size_t len, bool as_lval,
-		   dwarf2_per_cu_data *per_cu, frame_info *frame,
+		   dwarf2_per_cu_data *per_cu, frame_info_ptr frame,
 		   const struct property_addr_info *addr_info = nullptr,
 		   struct type *type = nullptr,
 		   struct type *subobj_type = nullptr,
@@ -196,7 +196,7 @@ private:
   dwarf2_per_objfile *m_per_objfile;
 
   /* Frame information used for the evaluation.  */
-  frame_info *m_frame = nullptr;
+  frame_info_ptr m_frame = nullptr;
 
   /* Compilation unit used for the evaluation.  */
   dwarf2_per_cu_data *m_per_cu = nullptr;
@@ -256,7 +256,7 @@ private:
 
 /* Return the value of register number REG (a DWARF register number),
    read as an address in a given FRAME.  */
-CORE_ADDR read_addr_from_reg (frame_info *frame, int reg);
+CORE_ADDR read_addr_from_reg (frame_info_ptr frame, int reg);
 
 void dwarf_expr_require_composition (const gdb_byte *, const gdb_byte *,
 				     const char *);
@@ -320,4 +320,4 @@ extern const gdb_byte *safe_read_sleb128 (const gdb_byte *buf,
 extern const gdb_byte *safe_skip_leb128 (const gdb_byte *buf,
 					 const gdb_byte *buf_end);
 
-#endif /* dwarf2expr.h */
+#endif /* DWARF2EXPR_H */

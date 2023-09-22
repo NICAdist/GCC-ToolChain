@@ -1,5 +1,5 @@
 /* Miscellaneous SSA utility functions.
-   Copyright (C) 2001-2022 Free Software Foundation, Inc.
+   Copyright (C) 2001-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -30,9 +30,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-core.h"
 #include "fold-const.h"
 #include "stor-layout.h"
+#include "gimple-iterator.h"
 #include "gimple-fold.h"
 #include "gimplify.h"
-#include "gimple-iterator.h"
 #include "gimple-walk.h"
 #include "tree-ssa-loop-manip.h"
 #include "tree-into-ssa.h"
@@ -1319,6 +1319,8 @@ bool
 ssa_undefined_value_p (tree t, bool partial)
 {
   gimple *def_stmt;
+
+  gcc_checking_assert (!virtual_operand_p (t));
 
   if (ssa_defined_default_def_p (t))
     return false;

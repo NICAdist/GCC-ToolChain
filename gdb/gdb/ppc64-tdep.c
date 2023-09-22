@@ -1,6 +1,6 @@
 /* Common target-dependent code for ppc64 GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -85,11 +85,11 @@
    Return the function's entry point.  */
 
 static CORE_ADDR
-ppc64_plt_entry_point (struct frame_info *frame, CORE_ADDR plt_off)
+ppc64_plt_entry_point (frame_info_ptr frame, CORE_ADDR plt_off)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
-  ppc_gdbarch_tdep *tdep = (ppc_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  ppc_gdbarch_tdep *tdep = gdbarch_tdep<ppc_gdbarch_tdep> (gdbarch);
   CORE_ADDR tocp;
 
   if (execution_direction == EXEC_REVERSE)
@@ -108,7 +108,7 @@ ppc64_plt_entry_point (struct frame_info *frame, CORE_ADDR plt_off)
 }
 
 static CORE_ADDR
-ppc64_plt_pcrel_entry_point (struct frame_info *frame, CORE_ADDR plt_off,
+ppc64_plt_pcrel_entry_point (frame_info_ptr frame, CORE_ADDR plt_off,
 			     CORE_ADDR pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
@@ -546,7 +546,7 @@ static const struct ppc_insn_pattern ppc64_standard_linkage12[] =
    dynamic linker lazy symbol resolution stubs.)  */
 
 static CORE_ADDR
-ppc64_standard_linkage1_target (struct frame_info *frame, unsigned int *insn)
+ppc64_standard_linkage1_target (frame_info_ptr frame, unsigned int *insn)
 {
   CORE_ADDR plt_off = ((ppc_insn_d_field (insn[0]) << 16)
 		       + ppc_insn_ds_field (insn[2]));
@@ -555,7 +555,7 @@ ppc64_standard_linkage1_target (struct frame_info *frame, unsigned int *insn)
 }
 
 static CORE_ADDR
-ppc64_standard_linkage2_target (struct frame_info *frame, unsigned int *insn)
+ppc64_standard_linkage2_target (frame_info_ptr frame, unsigned int *insn)
 {
   CORE_ADDR plt_off = ((ppc_insn_d_field (insn[1]) << 16)
 		       + ppc_insn_ds_field (insn[3]));
@@ -564,7 +564,7 @@ ppc64_standard_linkage2_target (struct frame_info *frame, unsigned int *insn)
 }
 
 static CORE_ADDR
-ppc64_standard_linkage3_target (struct frame_info *frame, unsigned int *insn)
+ppc64_standard_linkage3_target (frame_info_ptr frame, unsigned int *insn)
 {
   CORE_ADDR plt_off = ppc_insn_ds_field (insn[1]);
 
@@ -572,7 +572,7 @@ ppc64_standard_linkage3_target (struct frame_info *frame, unsigned int *insn)
 }
 
 static CORE_ADDR
-ppc64_standard_linkage4_target (struct frame_info *frame, unsigned int *insn)
+ppc64_standard_linkage4_target (frame_info_ptr frame, unsigned int *insn)
 {
   CORE_ADDR plt_off = ((ppc_insn_d_field (insn[1]) << 16)
 		       + ppc_insn_ds_field (insn[2]));
@@ -581,7 +581,7 @@ ppc64_standard_linkage4_target (struct frame_info *frame, unsigned int *insn)
 }
 
 static CORE_ADDR
-ppc64_pcrel_linkage1_target (struct frame_info *frame, unsigned int *insn,
+ppc64_pcrel_linkage1_target (frame_info_ptr frame, unsigned int *insn,
 			     CORE_ADDR pc)
 {
   /* insn[0] is for the std instruction.  */
@@ -591,7 +591,7 @@ ppc64_pcrel_linkage1_target (struct frame_info *frame, unsigned int *insn,
 }
 
 static CORE_ADDR
-ppc64_pcrel_linkage2_target (struct frame_info *frame, unsigned int *insn,
+ppc64_pcrel_linkage2_target (frame_info_ptr frame, unsigned int *insn,
 			     CORE_ADDR pc)
 {
   CORE_ADDR plt_off;
@@ -611,7 +611,7 @@ ppc64_pcrel_linkage2_target (struct frame_info *frame, unsigned int *insn,
    check whether we are in the middle of a PLT stub.  */
 
 static CORE_ADDR
-ppc64_skip_trampoline_code_1 (struct frame_info *frame, CORE_ADDR pc)
+ppc64_skip_trampoline_code_1 (frame_info_ptr frame, CORE_ADDR pc)
 {
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
   unsigned int insns[MAX (MAX (MAX (ARRAY_SIZE (ppc64_standard_linkage1),
@@ -707,7 +707,7 @@ ppc64_skip_trampoline_code_1 (struct frame_info *frame, CORE_ADDR pc)
    ppc_elfv2_skip_entrypoint.  */
 
 CORE_ADDR
-ppc64_skip_trampoline_code (struct frame_info *frame, CORE_ADDR pc)
+ppc64_skip_trampoline_code (frame_info_ptr frame, CORE_ADDR pc)
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
 
@@ -798,6 +798,6 @@ ppc64_elf_make_msymbol_special (asymbol *sym, struct minimal_symbol *msym)
   if ((sym->flags & BSF_SYNTHETIC) != 0 && sym->udata.p != NULL)
     {
       elf_symbol_type *elf_sym = (elf_symbol_type *) sym->udata.p;
-      SET_MSYMBOL_SIZE (msym, elf_sym->internal_elf_sym.st_size);
+      msym->set_size (elf_sym->internal_elf_sym.st_size);
     }
 }

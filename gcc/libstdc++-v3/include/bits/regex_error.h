@@ -1,6 +1,6 @@
-// class template regex -*- C++ -*-
+// Errors for std::regex -*- C++ -*-
 
-// Copyright (C) 2010-2022 Free Software Foundation, Inc.
+// Copyright (C) 2010-2023 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -130,6 +130,9 @@ namespace regex_constants
    * @ingroup exceptions
    *
    * The regular expression library throws objects of this class on error.
+   *
+   * @headerfile regex
+   * @since C++11
    */
   class regex_error : public std::runtime_error
   {
@@ -158,6 +161,7 @@ namespace regex_constants
     { return _M_code; }
 
   private:
+    /// @cond undocumented
     regex_error(error_type __ecode, const char* __what)
     : std::runtime_error(__what), _M_code(__ecode)
     { }
@@ -167,6 +171,7 @@ namespace regex_constants
     __throw_regex_error(error_type __ecode __attribute__((__unused__)),
 			const char* __what __attribute__((__unused__)))
     { _GLIBCXX_THROW_OR_ABORT(regex_error(__ecode, __what)); }
+    /// @endcond
   };
 
   /// @cond undocumented

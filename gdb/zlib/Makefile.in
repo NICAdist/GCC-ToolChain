@@ -372,7 +372,6 @@ pdfdir = @pdfdir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
-runstatedir = @runstatedir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
@@ -401,6 +400,7 @@ zconf.h.in zlib.h zutil.c zutil.h
 @TARGET_LIBRARY_FALSE@toolexeclib_LIBRARIES = libz.a
 @TARGET_LIBRARY_FALSE@libz_a_SOURCES = $(ZLIB_SOURCES)
 @TARGET_LIBRARY_FALSE@libz_a_CFLAGS = $(AM_CFLAGS) $(PICFLAG)
+AM_CFLAGS = $(CET_FLAGS)
 
 # Work around what appears to be a GNU make bug handling MAKEFLAGS
 # values defined in terms of make variables, as is the case for CC and

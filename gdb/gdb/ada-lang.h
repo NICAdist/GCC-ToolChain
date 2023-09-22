@@ -1,6 +1,6 @@
 /* Ada language support definitions for GDB, the GNU debugger.
 
-   Copyright (C) 1992-2022 Free Software Foundation, Inc.
+   Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -20,7 +20,7 @@
 #if !defined (ADA_LANG_H)
 #define ADA_LANG_H 1
 
-struct frame_info;
+class frame_info_ptr;
 struct inferior;
 struct type_print_options;
 struct parser_state;
@@ -218,8 +218,10 @@ extern const char *ada_decode_symbol (const struct general_symbol_info *);
    the name does not appear to be GNAT-encoded, then the result
    depends on WRAP.  If WRAP is true (the default), then the result is
    simply wrapped in <...>.  If WRAP is false, then the empty string
-   will be returned.  */
-extern std::string ada_decode (const char *name, bool wrap = true);
+   will be returned.  Also, when OPERATORS is false, operator names
+   will not be decoded.  */
+extern std::string ada_decode (const char *name, bool wrap = true,
+			       bool operators = true);
 
 extern std::vector<struct block_symbol> ada_lookup_symbol_list
      (const char *, const struct block *, domain_enum);
@@ -232,7 +234,8 @@ extern void ada_lookup_encoded_symbol
   (const char *name, const struct block *block, domain_enum domain,
    struct block_symbol *symbol_info);
 
-extern struct bound_minimal_symbol ada_lookup_simple_minsym (const char *);
+extern struct bound_minimal_symbol ada_lookup_simple_minsym (const char *,
+							     objfile *);
 
 extern int ada_scan_number (const char *, int, LONGEST *, int *);
 
@@ -314,7 +317,7 @@ extern struct type *ada_get_base_type (struct type *);
 
 extern struct type *ada_check_typedef (struct type *);
 
-extern std::string ada_encode (const char *);
+extern std::string ada_encode (const char *, bool fold = true);
 
 extern const char *ada_enum_name (const char *);
 
@@ -332,7 +335,7 @@ extern enum ada_renaming_category ada_parse_renaming (struct symbol *,
 						      const char **,
 						      int *, const char **);
 
-extern void ada_find_printable_frame (struct frame_info *fi);
+extern void ada_find_printable_frame (frame_info_ptr fi);
 
 extern char *ada_breakpoint_rewrite (char *, int *);
 

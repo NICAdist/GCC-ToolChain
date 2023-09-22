@@ -1,5 +1,5 @@
 /* Remote utility routines for the remote server for GDB.
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -296,8 +296,7 @@ remote_prepare (const char *name)
       ((struct sockaddr_in6 *) iter->ai_addr)->sin6_addr = in6addr_any;
       break;
     default:
-      internal_error (__FILE__, __LINE__,
-		      _("Invalid 'ai_family' %d\n"), iter->ai_family);
+      internal_error (_("Invalid 'ai_family' %d\n"), iter->ai_family);
     }
 
   if (bind (listen_desc, iter->ai_addr, iter->ai_addrlen) != 0)
@@ -1070,6 +1069,7 @@ prepare_resume_reply (char *buf, ptid_t ptid, const target_waitstatus &status)
       {
 	const char **regp;
 	struct regcache *regcache;
+	char *buf_start = buf;
 
 	if ((status.kind () == TARGET_WAITKIND_FORKED && cs.report_fork_events)
 	    || (status.kind () == TARGET_WAITKIND_VFORKED
@@ -1140,11 +1140,11 @@ prepare_resume_reply (char *buf, ptid_t ptid, const target_waitstatus &status)
 	       An 'S' stop packet always looks like 'Sxx', so all we do
 	       here is convert the buffer from a T packet to an S packet
 	       and the avoid adding any extra content by breaking out.  */
-	    gdb_assert (*buf == 'T');
-	    gdb_assert (isxdigit (*(buf + 1)));
-	    gdb_assert (isxdigit (*(buf + 2)));
-	    *buf = 'S';
-	    *(buf + 3) = '\0';
+	    gdb_assert (buf_start[0] == 'T');
+	    gdb_assert (isxdigit (buf_start[1]));
+	    gdb_assert (isxdigit (buf_start[2]));
+	    buf_start[0] = 'S';
+	    buf_start[3] = '\0';
 	    break;
 	  }
 

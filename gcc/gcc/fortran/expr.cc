@@ -1,5 +1,5 @@
 /* Routines for manipulation of expression nodes.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Andy Vaught
 
 This file is part of GCC.
@@ -464,6 +464,10 @@ free_expr0 (gfc_expr *e)
 
 	case BT_COMPLEX:
 	  mpc_clear (e->value.complex);
+	  break;
+
+	case BT_BOZ:
+	  free (e->boz.str);
 	  break;
 
 	default:
@@ -3500,8 +3504,6 @@ check_restricted (gfc_expr *e)
 	    || sym->attr.implied_index
 	    || sym->attr.flavor == FL_PARAMETER
 	    || is_parent_of_current_ns (sym->ns)
-	    || (sym->ns->proc_name != NULL
-		  && sym->ns->proc_name->attr.flavor == FL_MODULE)
 	    || (gfc_is_formal_arg () && (sym->ns == gfc_current_ns)))
 	{
 	  t = true;
@@ -6254,7 +6256,7 @@ gfc_check_vardef_context (gfc_expr* e, bool pointer, bool alloc_obj,
       && !(sym->attr.flavor == FL_PROCEDURE && sym == sym->result)
       && !(sym->attr.flavor == FL_PROCEDURE && sym->attr.proc_pointer)
       && !(sym->attr.flavor == FL_PROCEDURE
-	   && sym->attr.function && sym->attr.pointer))
+	   && sym->attr.function && attr.pointer))
     {
       if (context)
 	gfc_error ("%qs in variable definition context (%s) at %L is not"

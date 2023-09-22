@@ -3357,8 +3357,10 @@ in
 {
     // Verify that pattern[] is valid
     import std.algorithm.searching : balancedParens;
-    assert(balancedParens(pattern, '[', ']', 0));
-    assert(balancedParens(pattern, '{', '}', 0));
+    import std.utf : byUTF;
+
+    assert(balancedParens(pattern.byUTF!C, '[', ']', 0));
+    assert(balancedParens(pattern.byUTF!C, '{', '}', 0));
 }
 do
 {

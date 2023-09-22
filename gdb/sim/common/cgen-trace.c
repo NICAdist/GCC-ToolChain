@@ -1,5 +1,5 @@
 /* Tracing support for CGEN-based simulators.
-   Copyright (C) 1996-2022 Free Software Foundation, Inc.
+   Copyright (C) 1996-2023 Free Software Foundation, Inc.
    Contributed by Cygnus Support.
 
 This file is part of GDB, the GNU debugger.
@@ -320,6 +320,22 @@ sim_disasm_sprintf (SFILE *f, const char *format, ...)
   return n;
 }
 
+/* sprintf to a "stream" with styling.  */
+
+int
+sim_disasm_styled_sprintf (SFILE *f, enum disassembler_style style,
+			   const char *format, ...)
+{
+  int n;
+  va_list args;
+
+  va_start (args, format);
+  vsprintf (f->current, format, args);
+  f->current += n = strlen (f->current);
+  va_end (args);
+  return n;
+}
+
 /* Memory read support for an opcodes disassembler.  */
 
 int
@@ -350,8 +366,8 @@ sim_disasm_perror_memory (int status, bfd_vma memaddr,
     /* Actually, address between memaddr and memaddr + len was
        out of bounds.  */
     info->fprintf_func (info->stream,
-			"Address 0x%" BFD_VMA_FMT "x is out of bounds.",
-			memaddr);
+			"Address 0x%" PRIx64 " is out of bounds.",
+			(uint64_t) memaddr);
 }
 
 /* Disassemble using the CGEN opcode table.
@@ -383,7 +399,8 @@ sim_cgen_disassemble_insn (SIM_CPU *cpu, const CGEN_INSN *insn,
 
   sfile.buffer = sfile.current = buf;
   INIT_DISASSEMBLE_INFO (disasm_info, (FILE *) &sfile,
-			 (fprintf_ftype) sim_disasm_sprintf);
+			 (fprintf_ftype) sim_disasm_sprintf,
+			 (fprintf_styled_ftype) sim_disasm_styled_sprintf);
   disasm_info.endian =
     (bfd_big_endian (STATE_PROG_BFD (sd)) ? BFD_ENDIAN_BIG
      : bfd_little_endian (STATE_PROG_BFD (sd)) ? BFD_ENDIAN_LITTLE
@@ -416,7 +433,7 @@ sim_cgen_disassemble_insn (SIM_CPU *cpu, const CGEN_INSN *insn,
   disasm_info.buffer = insn_buf.bytes;
   disasm_info.buffer_length = length;
 
-  ex_info.dis_info = (PTR) &disasm_info;
+  ex_info.dis_info = &disasm_info;
   ex_info.valid = (1 << length) - 1;
   ex_info.insn_bytes = insn_buf.bytes;
 

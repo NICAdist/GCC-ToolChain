@@ -1,6 +1,6 @@
 /* Simulator for Analog Devices Blackfin processors.
 
-   Copyright (C) 2005-2022 Free Software Foundation, Inc.
+   Copyright (C) 2005-2023 Free Software Foundation, Inc.
    Contributed by Analog Devices, Inc. and Mike Frysinger.
 
    This file is part of simulators.
@@ -1758,7 +1758,7 @@ bfin_model_init (SIM_CPU *cpu)
 }
 
 static bu32
-bfin_extract_unsigned_integer (unsigned char *addr, int len)
+bfin_extract_unsigned_integer (const unsigned char *addr, int len)
 {
   bu32 retval;
   unsigned char * p;
@@ -1850,7 +1850,7 @@ bfin_get_reg (SIM_CPU *cpu, int rn)
 }
 
 static int
-bfin_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
+bfin_reg_fetch (SIM_CPU *cpu, int rn, void *buf, int len)
 {
   bu32 value, *reg;
 
@@ -1881,7 +1881,7 @@ bfin_reg_fetch (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
 }
 
 static int
-bfin_reg_store (SIM_CPU *cpu, int rn, unsigned char *buf, int len)
+bfin_reg_store (SIM_CPU *cpu, int rn, const void *buf, int len)
 {
   bu32 value, *reg;
 

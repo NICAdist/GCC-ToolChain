@@ -1,6 +1,6 @@
 /* Maintenance commands for testing the settings framework.
 
-   Copyright (C) 2019-2022 Free Software Foundation, Inc.
+   Copyright (C) 2019-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -75,7 +75,7 @@ maintenance_show_test_settings_value_cmd
   (struct ui_file *file, int from_tty,
    struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, (("%s\n")), value);
+  gdb_printf (file, (("%s\n")), value);
 }
 
 

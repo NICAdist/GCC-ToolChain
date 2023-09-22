@@ -1,6 +1,6 @@
 /* Target-dependent code for FreeBSD/i386.
 
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,6 +35,9 @@
 /* The general-purpose regset consists of 19 32-bit slots.  */
 #define I386_FBSD_SIZEOF_GREGSET	(19 * 4)
 
+/* The segment base register set consists of 2 32-bit registers.  */
+#define I386_FBSD_SIZEOF_SEGBASES_REGSET	(2 * 4)
+
 /* Register maps.  */
 
 static const struct regcache_map_entry i386_fbsd_gregmap[] =
@@ -58,6 +61,13 @@ static const struct regcache_map_entry i386_fbsd_gregmap[] =
   { 1, I386_ESP_REGNUM, 0 },
   { 1, I386_SS_REGNUM, 4 },
   { 1, I386_GS_REGNUM, 4 },
+  { 0 }
+};
+
+static const struct regcache_map_entry i386_fbsd_segbases_regmap[] =
+{
+  { 1, I386_FSBASE_REGNUM, 0 },
+  { 1, I386_GSBASE_REGNUM, 0 },
   { 0 }
 };
 
@@ -103,6 +113,11 @@ const struct regset i386_fbsd_gregset =
   i386_fbsd_gregmap, regcache_supply_regset, regcache_collect_regset
 };
 
+const struct regset i386_fbsd_segbases_regset =
+{
+  i386_fbsd_segbases_regmap, regcache_supply_regset, regcache_collect_regset
+};
+
 /* Support for signal handlers.  */
 
 /* In a signal frame, esp points to a 'struct sigframe' which is
@@ -141,7 +156,7 @@ const struct regset i386_fbsd_gregset =
 
 static void
 i386_fbsd_sigframe_init (const struct tramp_frame *self,
-			 struct frame_info *this_frame,
+			 frame_info_ptr this_frame,
 			 struct trad_frame_cache *this_cache,
 			 CORE_ADDR func)
 {
@@ -310,12 +325,15 @@ i386fbsd_iterate_over_regset_sections (struct gdbarch *gdbarch,
 				       void *cb_data,
 				       const struct regcache *regcache)
 {
-  i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   cb (".reg", I386_FBSD_SIZEOF_GREGSET, I386_FBSD_SIZEOF_GREGSET,
       &i386_fbsd_gregset, NULL, cb_data);
   cb (".reg2", tdep->sizeof_fpregset, tdep->sizeof_fpregset, &i386_fpregset,
       NULL, cb_data);
+  cb (".reg-x86-segbases", I386_FBSD_SIZEOF_SEGBASES_REGSET,
+      I386_FBSD_SIZEOF_SEGBASES_REGSET, &i386_fbsd_segbases_regset,
+      "segment bases", cb_data);
 
   if (tdep->xcr0 & X86_XSTATE_AVX)
     cb (".reg-xstate", X86_XSTATE_SIZE (tdep->xcr0),
@@ -329,19 +347,15 @@ static CORE_ADDR
 i386fbsd_get_thread_local_address (struct gdbarch *gdbarch, ptid_t ptid,
 				   CORE_ADDR lm_addr, CORE_ADDR offset)
 {
-  i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
   struct regcache *regcache;
-
-  if (tdep->fsbase_regnum == -1)
-    error (_("Unable to fetch %%gsbase"));
 
   regcache = get_thread_arch_regcache (current_inferior ()->process_target (),
 				       ptid, gdbarch);
 
-  target_fetch_registers (regcache, tdep->fsbase_regnum + 1);
+  target_fetch_registers (regcache, I386_GSBASE_REGNUM);
 
   ULONGEST gsbase;
-  if (regcache->cooked_read (tdep->fsbase_regnum + 1, &gsbase) != REG_VALID)
+  if (regcache->cooked_read (I386_GSBASE_REGNUM, &gsbase) != REG_VALID)
     error (_("Unable to fetch %%gsbase"));
 
   CORE_ADDR dtv_addr = gsbase + gdbarch_ptr_bit (gdbarch) / 8;
@@ -351,7 +365,7 @@ i386fbsd_get_thread_local_address (struct gdbarch *gdbarch, ptid_t ptid,
 static void
 i386fbsd_init_abi (struct gdbarch_info info, struct gdbarch *gdbarch)
 {
-  i386_gdbarch_tdep *tdep = (i386_gdbarch_tdep *) gdbarch_tdep (gdbarch);
+  i386_gdbarch_tdep *tdep = gdbarch_tdep<i386_gdbarch_tdep> (gdbarch);
 
   /* Generic FreeBSD support. */
   fbsd_init_abi (info, gdbarch);

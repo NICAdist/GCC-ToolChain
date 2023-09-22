@@ -1,4 +1,4 @@
-/* Copyright (C) 1992-2022 Free Software Foundation, Inc.
+/* Copyright (C) 1992-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -85,6 +85,20 @@ static const char * const task_states[] = {
   N_("Selective Wait")
 };
 
+/* Return a string representing the task state.  */
+static const char *
+get_state (unsigned value)
+{
+  if (value >= 0
+      && value <= ARRAY_SIZE (task_states)
+      && task_states[value][0] != '\0')
+    return _(task_states[value]);
+
+  static char buffer[100];
+  xsnprintf (buffer, sizeof (buffer), _("Unknown task state: %d"), value);
+  return buffer;
+}
+
 /* A longer description corresponding to each possible task state.  */
 static const char * const long_task_states[] = {
   N_("Unactivated"),
@@ -106,6 +120,21 @@ static const char * const long_task_states[] = {
   N_("Activating"),
   N_("Blocked in selective wait statement")
 };
+
+/* Return a string representing the task state.  This uses the long
+   descriptions.  */
+static const char *
+get_long_state (unsigned value)
+{
+  if (value >= 0
+      && value <= ARRAY_SIZE (long_task_states)
+      && long_task_states[value][0] != '\0')
+    return _(long_task_states[value]);
+
+  static char buffer[100];
+  xsnprintf (buffer, sizeof (buffer), _("Unknown task state: %d"), value);
+  return buffer;
+}
 
 /* The index of certain important fields in the Ada Task Control Block
    record and sub-records.  */
@@ -166,7 +195,7 @@ struct ada_tasks_pspace_data
 };
 
 /* Key to our per-program-space data.  */
-static const struct program_space_key<ada_tasks_pspace_data>
+static const registry<program_space>::key<ada_tasks_pspace_data>
   ada_tasks_pspace_data_handle;
 
 /* The kind of data structure used by the runtime to store the list
@@ -242,7 +271,7 @@ struct ada_tasks_inferior_data
 };
 
 /* Key to our per-inferior data.  */
-static const struct inferior_key<ada_tasks_inferior_data>
+static const registry<inferior>::key<ada_tasks_inferior_data>
   ada_tasks_inferior_data_handle;
 
 /* Return a string with TASKNO followed by the task name if TASK_INFO
@@ -436,7 +465,7 @@ read_fat_string_value (char *dest, struct value *val, int max_len)
 
       bounds_type = type->field (bounds_fieldno).type ();
       if (bounds_type->code () == TYPE_CODE_PTR)
-	bounds_type = TYPE_TARGET_TYPE (bounds_type);
+	bounds_type = bounds_type->target_type ();
       if (bounds_type->code () != TYPE_CODE_STRUCT)
 	error (_("Unknown task name format. Aborting"));
       upper_bound_fieldno = ada_get_field_index (bounds_type, "UB0", 0);
@@ -574,7 +603,7 @@ ada_get_tcb_types_info (void)
   unsigned int first_id = 0;
   if (first_id_sym.minsym != nullptr)
     {
-      CORE_ADDR addr = BMSYMBOL_VALUE_ADDRESS (first_id_sym);
+      CORE_ADDR addr = first_id_sym.value_address ();
       /* This symbol always has type uint32_t.  */
       struct type *u32type = builtin_type (target_gdbarch ())->builtin_uint32;
       first_id = value_as_long (value_at (u32type, addr));
@@ -818,7 +847,7 @@ add_ada_task (CORE_ADDR task_id, struct inferior *inf)
 static bool
 read_known_tasks_array (struct ada_tasks_inferior_data *data)
 {
-  const int target_ptr_byte = TYPE_LENGTH (data->known_tasks_element);
+  const int target_ptr_byte = data->known_tasks_element->length ();
   const int known_tasks_size = target_ptr_byte * data->known_tasks_length;
   gdb_byte *known_tasks = (gdb_byte *) alloca (known_tasks_size);
   int i;
@@ -845,7 +874,7 @@ read_known_tasks_array (struct ada_tasks_inferior_data *data)
 static bool
 read_known_tasks_list (struct ada_tasks_inferior_data *data)
 {
-  const int target_ptr_byte = TYPE_LENGTH (data->known_tasks_element);
+  const int target_ptr_byte = data->known_tasks_element->length ();
   gdb_byte *known_tasks = (gdb_byte *) alloca (target_ptr_byte);
   CORE_ADDR task_id;
   const struct ada_tasks_pspace_data *pspace_data
@@ -896,7 +925,7 @@ ada_tasks_inferior_data_sniffer (struct ada_tasks_inferior_data *data)
   if (msym.minsym != NULL)
     {
       data->known_tasks_kind = ADA_TASKS_ARRAY;
-      data->known_tasks_addr = BMSYMBOL_VALUE_ADDRESS (msym);
+      data->known_tasks_addr = msym.value_address ();
 
       /* Try to get pointer type and array length from the symtab.  */
       sym = lookup_symbol_in_language (KNOWN_TASKS_NAME, NULL, VAR_DOMAIN,
@@ -909,7 +938,7 @@ ada_tasks_inferior_data_sniffer (struct ada_tasks_inferior_data *data)
 	  struct type *idxtype = NULL;
 
 	  if (type->code () == TYPE_CODE_ARRAY)
-	    eltype = check_typedef (TYPE_TARGET_TYPE (type));
+	    eltype = check_typedef (type->target_type ());
 	  if (eltype != NULL
 	      && eltype->code () == TYPE_CODE_PTR)
 	    idxtype = check_typedef (type->index_type ());
@@ -942,12 +971,12 @@ ada_tasks_inferior_data_sniffer (struct ada_tasks_inferior_data *data)
   if (msym.minsym != NULL)
     {
       data->known_tasks_kind = ADA_TASKS_LIST;
-      data->known_tasks_addr = BMSYMBOL_VALUE_ADDRESS (msym);
+      data->known_tasks_addr = msym.value_address ();
       data->known_tasks_length = 1;
 
       sym = lookup_symbol_in_language (KNOWN_TASKS_LIST, NULL, VAR_DOMAIN,
 				       language_c, NULL).symbol;
-      if (sym != NULL && SYMBOL_VALUE_ADDRESS (sym) != 0)
+      if (sym != NULL && sym->value_address () != 0)
 	{
 	  /* Validate.  */
 	  struct type *type = check_typedef (sym->type ());
@@ -1182,7 +1211,7 @@ print_ada_task_info (struct ui_out *uiout,
 			  get_task_number_from_id (task_info->called_task,
 						   inf));
       else
-	uiout->field_string ("state", task_states[task_info->state]);
+	uiout->field_string ("state", get_state (task_info->state));
 
       /* Finally, print the task name, without quotes around it, as mi like
 	 is not expecting quotes, and in non mi-like no need for quotes
@@ -1223,23 +1252,23 @@ info_task (struct ui_out *uiout, const char *taskno_str, struct inferior *inf)
   task_info = &data->task_list[taskno - 1];
 
   /* Print the Ada task ID.  */
-  printf_filtered (_("Ada Task: %s\n"),
-		   paddress (target_gdbarch (), task_info->task_id));
+  gdb_printf (_("Ada Task: %s\n"),
+	      paddress (target_gdbarch (), task_info->task_id));
 
   /* Print the name of the task.  */
   if (task_info->name[0] != '\0')
-    printf_filtered (_("Name: %s\n"), task_info->name);
+    gdb_printf (_("Name: %s\n"), task_info->name);
   else
     fprintf_styled (gdb_stdout, metadata_style.style (), _("<no name>\n"));
 
   /* Print the TID and LWP.  */
-  printf_filtered (_("Thread: 0x%s\n"), phex_nz (task_info->ptid.tid (),
-						 sizeof (ULONGEST)));
-  printf_filtered (_("LWP: %#lx\n"), task_info->ptid.lwp ());
+  gdb_printf (_("Thread: 0x%s\n"), phex_nz (task_info->ptid.tid (),
+					    sizeof (ULONGEST)));
+  gdb_printf (_("LWP: %#lx\n"), task_info->ptid.lwp ());
 
   /* If set, print the base CPU.  */
   if (task_info->base_cpu != 0)
-    printf_filtered (_("Base CPU: %d\n"), task_info->base_cpu);
+    gdb_printf (_("Base CPU: %d\n"), task_info->base_cpu);
 
   /* Print who is the parent (if any).  */
   if (task_info->parent != 0)
@@ -1248,16 +1277,16 @@ info_task (struct ui_out *uiout, const char *taskno_str, struct inferior *inf)
     {
       struct ada_task_info *parent = &data->task_list[parent_taskno - 1];
 
-      printf_filtered (_("Parent: %d"), parent_taskno);
+      gdb_printf (_("Parent: %d"), parent_taskno);
       if (parent->name[0] != '\0')
-	printf_filtered (" (%s)", parent->name);
-      printf_filtered ("\n");
+	gdb_printf (" (%s)", parent->name);
+      gdb_printf ("\n");
     }
   else
-    printf_filtered (_("No parent\n"));
+    gdb_printf (_("No parent\n"));
 
   /* Print the base priority.  */
-  printf_filtered (_("Base Priority: %d\n"), task_info->priority);
+  gdb_printf (_("Base Priority: %d\n"), task_info->priority);
 
   /* print the task current state.  */
   {
@@ -1266,27 +1295,27 @@ info_task (struct ui_out *uiout, const char *taskno_str, struct inferior *inf)
     if (task_info->caller_task)
       {
 	target_taskno = get_task_number_from_id (task_info->caller_task, inf);
-	printf_filtered (_("State: Accepting rendezvous with %d"),
-			 target_taskno);
+	gdb_printf (_("State: Accepting rendezvous with %d"),
+		    target_taskno);
       }
     else if (task_info->called_task)
       {
 	target_taskno = get_task_number_from_id (task_info->called_task, inf);
-	printf_filtered (_("State: Waiting on task %d's entry"),
-			 target_taskno);
+	gdb_printf (_("State: Waiting on task %d's entry"),
+		    target_taskno);
       }
     else
-      printf_filtered (_("State: %s"), _(long_task_states[task_info->state]));
+      gdb_printf (_("State: %s"), get_long_state (task_info->state));
 
     if (target_taskno)
       {
 	ada_task_info *target_task_info = &data->task_list[target_taskno - 1];
 
 	if (target_task_info->name[0] != '\0')
-	  printf_filtered (" (%s)", target_task_info->name);
+	  gdb_printf (" (%s)", target_task_info->name);
       }
 
-    printf_filtered ("\n");
+    gdb_printf ("\n");
   }
 }
 
@@ -1316,15 +1345,15 @@ display_current_task_id (void)
   const int current_task = ada_get_task_number (inferior_thread ());
 
   if (current_task == 0)
-    printf_filtered (_("[Current task is unknown]\n"));
+    gdb_printf (_("[Current task is unknown]\n"));
   else
     {
       struct ada_tasks_inferior_data *data
 	= get_ada_tasks_inferior_data (current_inferior ());
       struct ada_task_info *task_info = &data->task_list[current_task - 1];
 
-      printf_filtered (_("[Current task is %s]\n"),
-		       task_to_str (current_task, task_info).c_str ());
+      gdb_printf (_("[Current task is %s]\n"),
+		  task_to_str (current_task, task_info).c_str ());
     }
 }
 
@@ -1372,8 +1401,8 @@ task_command_1 (const char *taskno_str, int from_tty, struct inferior *inf)
 
   switch_to_thread (tp);
   ada_find_printable_frame (get_selected_frame (NULL));
-  printf_filtered (_("[Switching to task %s]\n"),
-		   task_to_str (taskno, task_info).c_str ());
+  gdb_printf (_("[Switching to task %s]\n"),
+	      task_to_str (taskno, task_info).c_str ());
   print_stack_frame (get_selected_frame (NULL),
 		     frame_relative_level (get_selected_frame (NULL)),
 		     SRC_AND_LOC, 1);

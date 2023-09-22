@@ -1,6 +1,6 @@
 /* MI Command Set.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -40,7 +40,7 @@
 #include "regcache.h"
 #include "frame.h"
 #include "mi-main.h"
-#include "mi-common.h"
+#include "mi-interp.h"
 #include "language.h"
 #include "valprint.h"
 #include "osdata.h"
@@ -95,7 +95,7 @@ static void mi_execute_async_cli_command (const char *cli_command,
 					  char **argv, int argc);
 static bool register_changed_p (int regnum, readonly_detached_regcache *,
 			       readonly_detached_regcache *);
-static void output_register (struct frame_info *, int regnum, int format,
+static void output_register (frame_info_ptr, int regnum, int format,
 			     int skip_unavailable);
 
 /* Controls whether the frontend wants MI in async mode.  */
@@ -123,9 +123,9 @@ show_mi_async_command (struct ui_file *file, int from_tty,
 		       struct cmd_list_element *c,
 		       const char *value)
 {
-  fprintf_filtered (file,
-		    _("Whether MI is in asynchronous mode is %s.\n"),
-		    value);
+  gdb_printf (file,
+	      _("Whether MI is in asynchronous mode is %s.\n"),
+	      value);
 }
 
 /* A wrapper for target_can_async_p that takes the MI setting into
@@ -153,8 +153,8 @@ mi_cmd_gdb_exit (const char *command, char **argv, int argc)
 
   /* We have to print everything right here because we never return.  */
   if (current_token)
-    fputs_unfiltered (current_token, mi->raw_stdout);
-  fputs_unfiltered ("^exit\n", mi->raw_stdout);
+    gdb_puts (current_token, mi->raw_stdout);
+  gdb_puts ("^exit\n", mi->raw_stdout);
   mi_out_put (current_uiout, mi->raw_stdout);
   gdb_flush (mi->raw_stdout);
   /* FIXME: The function called is not yet a formal libgdb function.  */
@@ -880,8 +880,7 @@ mi_cmd_data_list_register_names (const char *command, char **argv, int argc)
 	   regnum < numregs;
 	   regnum++)
 	{
-	  if (gdbarch_register_name (gdbarch, regnum) == NULL
-	      || *(gdbarch_register_name (gdbarch, regnum)) == '\0')
+	  if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
 	    uiout->field_string (NULL, "");
 	  else
 	    uiout->field_string (NULL, gdbarch_register_name (gdbarch, regnum));
@@ -895,8 +894,7 @@ mi_cmd_data_list_register_names (const char *command, char **argv, int argc)
       if (regnum < 0 || regnum >= numregs)
 	error (_("bad register number"));
 
-      if (gdbarch_register_name (gdbarch, regnum) == NULL
-	  || *(gdbarch_register_name (gdbarch, regnum)) == '\0')
+      if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
 	uiout->field_string (NULL, "");
       else
 	uiout->field_string (NULL, gdbarch_register_name (gdbarch, regnum));
@@ -940,8 +938,7 @@ mi_cmd_data_list_changed_registers (const char *command, char **argv, int argc)
 	   regnum < numregs;
 	   regnum++)
 	{
-	  if (gdbarch_register_name (gdbarch, regnum) == NULL
-	      || *(gdbarch_register_name (gdbarch, regnum)) == '\0')
+	  if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
 	    continue;
 
 	  if (register_changed_p (regnum, prev_regs.get (),
@@ -957,7 +954,6 @@ mi_cmd_data_list_changed_registers (const char *command, char **argv, int argc)
 
       if (regnum >= 0
 	  && regnum < numregs
-	  && gdbarch_register_name (gdbarch, regnum) != NULL
 	  && *gdbarch_register_name (gdbarch, regnum) != '\000')
 	{
 	  if (register_changed_p (regnum, prev_regs.get (),
@@ -1008,7 +1004,7 @@ void
 mi_cmd_data_list_register_values (const char *command, char **argv, int argc)
 {
   struct ui_out *uiout = current_uiout;
-  struct frame_info *frame;
+  frame_info_ptr frame;
   struct gdbarch *gdbarch;
   int regnum, numregs, format;
   int i;
@@ -1067,8 +1063,7 @@ mi_cmd_data_list_register_values (const char *command, char **argv, int argc)
 	   regnum < numregs;
 	   regnum++)
 	{
-	  if (gdbarch_register_name (gdbarch, regnum) == NULL
-	      || *(gdbarch_register_name (gdbarch, regnum)) == '\0')
+	  if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
 	    continue;
 
 	  output_register (frame, regnum, format, skip_unavailable);
@@ -1082,7 +1077,6 @@ mi_cmd_data_list_register_values (const char *command, char **argv, int argc)
 
       if (regnum >= 0
 	  && regnum < numregs
-	  && gdbarch_register_name (gdbarch, regnum) != NULL
 	  && *gdbarch_register_name (gdbarch, regnum) != '\000')
 	output_register (frame, regnum, format, skip_unavailable);
       else
@@ -1095,7 +1089,7 @@ mi_cmd_data_list_register_values (const char *command, char **argv, int argc)
    unavailable.  */
 
 static void
-output_register (struct frame_info *frame, int regnum, int format,
+output_register (frame_info_ptr frame, int regnum, int format,
 		 int skip_unavailable)
 {
   struct ui_out *uiout = current_uiout;
@@ -1163,8 +1157,7 @@ mi_cmd_data_write_register_values (const char *command, char **argv, int argc)
       int regnum = atoi (argv[i]);
 
       if (regnum >= 0 && regnum < numregs
-	  && gdbarch_register_name (gdbarch, regnum)
-	  && *gdbarch_register_name (gdbarch, regnum))
+	  && *gdbarch_register_name (gdbarch, regnum) != '\0')
 	{
 	  LONGEST value;
 
@@ -1816,9 +1809,9 @@ captured_mi_execute_command (struct ui_out *uiout, struct mi_parse *context)
     case MI_COMMAND:
       /* A MI command was read from the input stream.  */
       if (mi_debug_p)
-	fprintf_unfiltered (gdb_stdlog,
-			    " token=`%s' command=`%s' args=`%s'\n",
-			    context->token, context->command, context->args);
+	gdb_printf (gdb_stdlog,
+		    " token=`%s' command=`%s' args=`%s'\n",
+		    context->token, context->command, context->args);
 
       mi_cmd_execute (context);
 
@@ -1830,15 +1823,15 @@ captured_mi_execute_command (struct ui_out *uiout, struct mi_parse *context)
 	 uiout will most likely crash in the mi_out_* routines.  */
       if (!running_result_record_printed)
 	{
-	  fputs_unfiltered (context->token, mi->raw_stdout);
+	  gdb_puts (context->token, mi->raw_stdout);
 	  /* There's no particularly good reason why target-connect results
 	     in not ^done.  Should kill ^connected for MI3.  */
-	  fputs_unfiltered (strcmp (context->command, "target-select") == 0
-			    ? "^connected" : "^done", mi->raw_stdout);
+	  gdb_puts (strcmp (context->command, "target-select") == 0
+		    ? "^connected" : "^done", mi->raw_stdout);
 	  mi_out_put (uiout, mi->raw_stdout);
 	  mi_out_rewind (uiout);
 	  mi_print_timing_maybe (mi->raw_stdout);
-	  fputs_unfiltered ("\n", mi->raw_stdout);
+	  gdb_puts ("\n", mi->raw_stdout);
 	}
       else
 	/* The command does not want anything to be printed.  In that
@@ -1855,7 +1848,7 @@ captured_mi_execute_command (struct ui_out *uiout, struct mi_parse *context)
 	/* This "feature" will be removed as soon as we have a
 	   complete set of mi commands.  */
 	/* Echo the command on the console.  */
-	fprintf_unfiltered (gdb_stdlog, "%s\n", context->command);
+	gdb_printf (gdb_stdlog, "%s\n", context->command);
 	/* Call the "console" interpreter.  */
 	argv[0] = (char *) INTERP_CONSOLE;
 	argv[1] = context->command;
@@ -1865,16 +1858,17 @@ captured_mi_execute_command (struct ui_out *uiout, struct mi_parse *context)
 	if (current_interp_named_p (INTERP_MI)
 	    || current_interp_named_p (INTERP_MI1)
 	    || current_interp_named_p (INTERP_MI2)
-	    || current_interp_named_p (INTERP_MI3))
+	    || current_interp_named_p (INTERP_MI3)
+	    || current_interp_named_p (INTERP_MI4))
 	  {
 	    if (!running_result_record_printed)
 	      {
-		fputs_unfiltered (context->token, mi->raw_stdout);
-		fputs_unfiltered ("^done", mi->raw_stdout);
+		gdb_puts (context->token, mi->raw_stdout);
+		gdb_puts ("^done", mi->raw_stdout);
 		mi_out_put (uiout, mi->raw_stdout);
 		mi_out_rewind (uiout);
 		mi_print_timing_maybe (mi->raw_stdout);
-		fputs_unfiltered ("\n", mi->raw_stdout);
+		gdb_puts ("\n", mi->raw_stdout);
 	      }
 	    else
 	      mi_out_rewind (uiout);
@@ -1891,22 +1885,22 @@ mi_print_exception (const char *token, const struct gdb_exception &exception)
 {
   struct mi_interp *mi = (struct mi_interp *) current_interpreter ();
 
-  fputs_unfiltered (token, mi->raw_stdout);
-  fputs_unfiltered ("^error,msg=\"", mi->raw_stdout);
+  gdb_puts (token, mi->raw_stdout);
+  gdb_puts ("^error,msg=\"", mi->raw_stdout);
   if (exception.message == NULL)
-    fputs_unfiltered ("unknown error", mi->raw_stdout);
+    gdb_puts ("unknown error", mi->raw_stdout);
   else
     mi->raw_stdout->putstr (exception.what (), '"');
-  fputs_unfiltered ("\"", mi->raw_stdout);
+  gdb_puts ("\"", mi->raw_stdout);
 
   switch (exception.error)
     {
       case UNDEFINED_COMMAND_ERROR:
-	fputs_unfiltered (",code=\"undefined-command\"", mi->raw_stdout);
+	gdb_puts (",code=\"undefined-command\"", mi->raw_stdout);
 	break;
     }
 
-  fputs_unfiltered ("\n", mi->raw_stdout);
+  gdb_puts ("\n", mi->raw_stdout);
 }
 
 void
@@ -2003,7 +1997,7 @@ struct user_selected_context
        reports not-equal, we only do the equality test if we have something
        other than the innermost frame selected.  */
     if (current_frame_level != -1
-	&& !frame_id_eq (current_frame_id, m_previous_frame_id))
+	&& current_frame_id != m_previous_frame_id)
       return true;
 
     /* Nothing changed!  */
@@ -2083,7 +2077,7 @@ mi_cmd_execute (struct mi_parse *parse)
   gdb::optional<scoped_restore_selected_frame> frame_saver;
   if (parse->frame != -1)
     {
-      struct frame_info *fid;
+      frame_info_ptr fid;
       int frame = parse->frame;
 
       fid = find_relative_frame (get_current_frame (), &frame);
@@ -2135,8 +2129,8 @@ mi_execute_cli_command (const char *cmd, bool args_p, const char *args)
 	gdb_assert (args == nullptr);
 
       if (mi_debug_p)
-	fprintf_unfiltered (gdb_stdlog, "cli=%s run=%s\n",
-			    cmd, run.c_str ());
+	gdb_printf (gdb_stdlog, "cli=%s run=%s\n",
+		    cmd, run.c_str ());
 
       execute_command (run.c_str (), 0 /* from_tty */ );
     }
@@ -2187,8 +2181,8 @@ mi_load_progress (const char *section_name,
       previous_sect_name = xstrdup (section_name);
 
       if (current_token)
-	fputs_unfiltered (current_token, mi->raw_stdout);
-      fputs_unfiltered ("+download", mi->raw_stdout);
+	gdb_puts (current_token, mi->raw_stdout);
+      gdb_puts ("+download", mi->raw_stdout);
       {
 	ui_out_emit_tuple tuple_emitter (uiout.get (), NULL);
 	uiout->field_string ("section", section_name);
@@ -2196,7 +2190,7 @@ mi_load_progress (const char *section_name,
 	uiout->field_signed ("total-size", grand_total);
       }
       mi_out_put (uiout.get (), mi->raw_stdout);
-      fputs_unfiltered ("\n", mi->raw_stdout);
+      gdb_puts ("\n", mi->raw_stdout);
       gdb_flush (mi->raw_stdout);
     }
 
@@ -2205,8 +2199,8 @@ mi_load_progress (const char *section_name,
     {
       last_update = time_now;
       if (current_token)
-	fputs_unfiltered (current_token, mi->raw_stdout);
-      fputs_unfiltered ("+download", mi->raw_stdout);
+	gdb_puts (current_token, mi->raw_stdout);
+      gdb_puts ("+download", mi->raw_stdout);
       {
 	ui_out_emit_tuple tuple_emitter (uiout.get (), NULL);
 	uiout->field_string ("section", section_name);
@@ -2216,7 +2210,7 @@ mi_load_progress (const char *section_name,
 	uiout->field_signed ("total-size", grand_total);
       }
       mi_out_put (uiout.get (), mi->raw_stdout);
-      fputs_unfiltered ("\n", mi->raw_stdout);
+      gdb_puts ("\n", mi->raw_stdout);
       gdb_flush (mi->raw_stdout);
     }
 }
@@ -2258,7 +2252,7 @@ print_diff (struct ui_file *file, struct mi_timestamp *start,
   duration<double> utime = end->utime - start->utime;
   duration<double> stime = end->stime - start->stime;
 
-  fprintf_unfiltered
+  gdb_printf
     (file,
      ",time={wallclock=\"%0.5f\",user=\"%0.5f\",system=\"%0.5f\"}",
      wallclock.count (), utime.count (), stime.count ());
@@ -2618,7 +2612,7 @@ mi_cmd_trace_frame_collected (const char *command, char **argv, int argc)
      the trace frame info, but instead consult the register cache for
      register availability.  */
   {
-    struct frame_info *frame;
+    frame_info_ptr frame;
     struct gdbarch *gdbarch;
     int regnum;
     int numregs;
@@ -2631,8 +2625,7 @@ mi_cmd_trace_frame_collected (const char *command, char **argv, int argc)
 
     for (regnum = 0; regnum < numregs; regnum++)
       {
-	if (gdbarch_register_name (gdbarch, regnum) == NULL
-	    || *(gdbarch_register_name (gdbarch, regnum)) == '\0')
+	if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
 	  continue;
 
 	output_register (frame, regnum, registers_format, 1);
@@ -2707,6 +2700,14 @@ mi_cmd_fix_multi_location_breakpoint_output (const char *command, char **argv,
 					     int argc)
 {
   fix_multi_location_breakpoint_output_globally = true;
+}
+
+/* See mi/mi-main.h.  */
+
+void
+mi_cmd_fix_breakpoint_script_output (const char *command, char **argv, int argc)
+{
+  fix_breakpoint_script_output_globally = true;
 }
 
 /* Implement the "-complete" command.  */

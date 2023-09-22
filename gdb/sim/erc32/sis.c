@@ -1,6 +1,6 @@
 /* This file is part of SIS (SPARC instruction simulator)
 
-   Copyright (C) 1995-2022 Free Software Foundation, Inc.
+   Copyright (C) 1995-2023 Free Software Foundation, Inc.
    Contributed by Jiri Gaisler, European Space Agency
 
    This program is free software; you can redistribute it and/or modify
@@ -138,6 +138,21 @@ run_sim(struct pstate *sregs, uint64_t icount, int dis)
     return TIME_OUT;
 }
 
+static int ATTRIBUTE_PRINTF (3, 4)
+fprintf_styled (void *stream, enum disassembler_style style,
+		const char *fmt, ...)
+{
+  int ret;
+  FILE *out = (FILE *) stream;
+  va_list args;
+
+  va_start (args, fmt);
+  ret = vfprintf (out, fmt, args);
+  va_end (args);
+
+  return ret;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -212,7 +227,8 @@ main(int argc, char **argv)
 #endif
     sregs.freq = freq;
 
-    INIT_DISASSEMBLE_INFO(dinfo, stdout, (fprintf_ftype) fprintf);
+    INIT_DISASSEMBLE_INFO(dinfo, stdout, (fprintf_ftype) fprintf,
+			  (fprintf_styled_ftype) fprintf_styled);
 #ifdef HOST_LITTLE_ENDIAN
     dinfo.endian = BFD_ENDIAN_LITTLE;
 #else

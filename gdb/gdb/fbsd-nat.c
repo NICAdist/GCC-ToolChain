@@ -1,6 +1,6 @@
 /* Native-dependent code for FreeBSD.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -49,10 +49,15 @@
 
 #include <list>
 
+#ifndef PT_GETREGSET
+#define	PT_GETREGSET	42	/* Get a target register set */
+#define	PT_SETREGSET	43	/* Set a target register set */
+#endif
+
 /* Return the name of a file that can be opened to get the symbols for
    the child process identified by PID.  */
 
-char *
+const char *
 fbsd_nat_target::pid_to_exec_file (int pid)
 {
   static char buf[PATH_MAX];
@@ -89,7 +94,7 @@ fbsd_nat_target::find_memory_regions (find_memory_region_ftype func,
   gdb::unique_xmalloc_ptr<struct kinfo_vmentry>
     vmentl (kinfo_getvmmap (pid, &nitems));
   if (vmentl == NULL)
-    perror_with_name (_("Couldn't fetch VM map entries."));
+    perror_with_name (_("Couldn't fetch VM map entries"));
 
   for (i = 0, kve = vmentl.get (); i < nitems; i++, kve++)
     {
@@ -108,19 +113,19 @@ fbsd_nat_target::find_memory_regions (find_memory_region_ftype func,
       size = kve->kve_end - kve->kve_start;
       if (info_verbose)
 	{
-	  printf_filtered ("Save segment, %ld bytes at %s (%c%c%c)\n",
-			   (long) size,
-			   paddress (target_gdbarch (), kve->kve_start),
-			   kve->kve_protection & KVME_PROT_READ ? 'r' : '-',
-			   kve->kve_protection & KVME_PROT_WRITE ? 'w' : '-',
-			   kve->kve_protection & KVME_PROT_EXEC ? 'x' : '-');
+	  gdb_printf ("Save segment, %ld bytes at %s (%c%c%c)\n",
+		      (long) size,
+		      paddress (target_gdbarch (), kve->kve_start),
+		      kve->kve_protection & KVME_PROT_READ ? 'r' : '-',
+		      kve->kve_protection & KVME_PROT_WRITE ? 'w' : '-',
+		      kve->kve_protection & KVME_PROT_EXEC ? 'x' : '-');
 	}
 
       /* Invoke the callback function to create the corefile segment.
 	 Pass MODIFIED as true, we do not know the real modification state.  */
       func (kve->kve_start, size, kve->kve_protection & KVME_PROT_READ,
 	    kve->kve_protection & KVME_PROT_WRITE,
-	    kve->kve_protection & KVME_PROT_EXEC, 1, data);
+	    kve->kve_protection & KVME_PROT_EXEC, 1, false, data);
     }
   return 0;
 }
@@ -241,7 +246,7 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
   else
     error (_("Invalid arguments."));
 
-  printf_filtered (_("process %d\n"), pid);
+  gdb_printf (_("process %d\n"), pid);
   if (do_cwd || do_exe || do_files)
     fdtbl.reset (kinfo_getfile (pid, &nfd));
 
@@ -249,7 +254,7 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
     {
       gdb::unique_xmalloc_ptr<char> cmdline = fbsd_fetch_cmdline (pid);
       if (cmdline != nullptr)
-	printf_filtered ("cmdline = '%s'\n", cmdline.get ());
+	gdb_printf ("cmdline = '%s'\n", cmdline.get ());
       else
 	warning (_("unable to fetch command line"));
     }
@@ -266,7 +271,7 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
 	    }
 	}
       if (cwd != NULL)
-	printf_filtered ("cwd = '%s'\n", cwd);
+	gdb_printf ("cwd = '%s'\n", cwd);
       else
 	warning (_("unable to fetch current working directory"));
     }
@@ -285,7 +290,7 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
       if (exe == NULL)
 	exe = pid_to_exec_file (pid);
       if (exe != NULL)
-	printf_filtered ("exe = '%s'\n", exe);
+	gdb_printf ("exe = '%s'\n", exe);
       else
 	warning (_("unable to fetch executable path name"));
     }
@@ -336,7 +341,7 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
 	  const char *state;
 	  int pgtok;
 
-	  printf_filtered ("Name: %s\n", kp.ki_comm);
+	  gdb_printf ("Name: %s\n", kp.ki_comm);
 	  switch (kp.ki_stat)
 	    {
 	    case SIDL:
@@ -364,69 +369,69 @@ fbsd_nat_target::info_proc (const char *args, enum info_proc_what what)
 	      state = "? (unknown)";
 	      break;
 	    }
-	  printf_filtered ("State: %s\n", state);
-	  printf_filtered ("Parent process: %d\n", kp.ki_ppid);
-	  printf_filtered ("Process group: %d\n", kp.ki_pgid);
-	  printf_filtered ("Session id: %d\n", kp.ki_sid);
-	  printf_filtered ("TTY: %s\n", pulongest (kp.ki_tdev));
-	  printf_filtered ("TTY owner process group: %d\n", kp.ki_tpgid);
-	  printf_filtered ("User IDs (real, effective, saved): %d %d %d\n",
-			   kp.ki_ruid, kp.ki_uid, kp.ki_svuid);
-	  printf_filtered ("Group IDs (real, effective, saved): %d %d %d\n",
-			   kp.ki_rgid, kp.ki_groups[0], kp.ki_svgid);
-	  printf_filtered ("Groups: ");
+	  gdb_printf ("State: %s\n", state);
+	  gdb_printf ("Parent process: %d\n", kp.ki_ppid);
+	  gdb_printf ("Process group: %d\n", kp.ki_pgid);
+	  gdb_printf ("Session id: %d\n", kp.ki_sid);
+	  gdb_printf ("TTY: %s\n", pulongest (kp.ki_tdev));
+	  gdb_printf ("TTY owner process group: %d\n", kp.ki_tpgid);
+	  gdb_printf ("User IDs (real, effective, saved): %d %d %d\n",
+		      kp.ki_ruid, kp.ki_uid, kp.ki_svuid);
+	  gdb_printf ("Group IDs (real, effective, saved): %d %d %d\n",
+		      kp.ki_rgid, kp.ki_groups[0], kp.ki_svgid);
+	  gdb_printf ("Groups: ");
 	  for (int i = 0; i < kp.ki_ngroups; i++)
-	    printf_filtered ("%d ", kp.ki_groups[i]);
-	  printf_filtered ("\n");
-	  printf_filtered ("Minor faults (no memory page): %ld\n",
-			   kp.ki_rusage.ru_minflt);
-	  printf_filtered ("Minor faults, children: %ld\n",
-			   kp.ki_rusage_ch.ru_minflt);
-	  printf_filtered ("Major faults (memory page faults): %ld\n",
-			   kp.ki_rusage.ru_majflt);
-	  printf_filtered ("Major faults, children: %ld\n",
-			   kp.ki_rusage_ch.ru_majflt);
-	  printf_filtered ("utime: %s.%06ld\n",
-			   plongest (kp.ki_rusage.ru_utime.tv_sec),
-			   kp.ki_rusage.ru_utime.tv_usec);
-	  printf_filtered ("stime: %s.%06ld\n",
-			   plongest (kp.ki_rusage.ru_stime.tv_sec),
-			   kp.ki_rusage.ru_stime.tv_usec);
-	  printf_filtered ("utime, children: %s.%06ld\n",
-			   plongest (kp.ki_rusage_ch.ru_utime.tv_sec),
-			   kp.ki_rusage_ch.ru_utime.tv_usec);
-	  printf_filtered ("stime, children: %s.%06ld\n",
-			   plongest (kp.ki_rusage_ch.ru_stime.tv_sec),
-			   kp.ki_rusage_ch.ru_stime.tv_usec);
-	  printf_filtered ("'nice' value: %d\n", kp.ki_nice);
-	  printf_filtered ("Start time: %s.%06ld\n",
-			   plongest (kp.ki_start.tv_sec),
-			   kp.ki_start.tv_usec);
+	    gdb_printf ("%d ", kp.ki_groups[i]);
+	  gdb_printf ("\n");
+	  gdb_printf ("Minor faults (no memory page): %ld\n",
+		      kp.ki_rusage.ru_minflt);
+	  gdb_printf ("Minor faults, children: %ld\n",
+		      kp.ki_rusage_ch.ru_minflt);
+	  gdb_printf ("Major faults (memory page faults): %ld\n",
+		      kp.ki_rusage.ru_majflt);
+	  gdb_printf ("Major faults, children: %ld\n",
+		      kp.ki_rusage_ch.ru_majflt);
+	  gdb_printf ("utime: %s.%06ld\n",
+		      plongest (kp.ki_rusage.ru_utime.tv_sec),
+		      kp.ki_rusage.ru_utime.tv_usec);
+	  gdb_printf ("stime: %s.%06ld\n",
+		      plongest (kp.ki_rusage.ru_stime.tv_sec),
+		      kp.ki_rusage.ru_stime.tv_usec);
+	  gdb_printf ("utime, children: %s.%06ld\n",
+		      plongest (kp.ki_rusage_ch.ru_utime.tv_sec),
+		      kp.ki_rusage_ch.ru_utime.tv_usec);
+	  gdb_printf ("stime, children: %s.%06ld\n",
+		      plongest (kp.ki_rusage_ch.ru_stime.tv_sec),
+		      kp.ki_rusage_ch.ru_stime.tv_usec);
+	  gdb_printf ("'nice' value: %d\n", kp.ki_nice);
+	  gdb_printf ("Start time: %s.%06ld\n",
+		      plongest (kp.ki_start.tv_sec),
+		      kp.ki_start.tv_usec);
 	  pgtok = getpagesize () / 1024;
-	  printf_filtered ("Virtual memory size: %s kB\n",
-			   pulongest (kp.ki_size / 1024));
-	  printf_filtered ("Data size: %s kB\n",
-			   pulongest (kp.ki_dsize * pgtok));
-	  printf_filtered ("Stack size: %s kB\n",
-			   pulongest (kp.ki_ssize * pgtok));
-	  printf_filtered ("Text size: %s kB\n",
-			   pulongest (kp.ki_tsize * pgtok));
-	  printf_filtered ("Resident set size: %s kB\n",
-			   pulongest (kp.ki_rssize * pgtok));
-	  printf_filtered ("Maximum RSS: %s kB\n",
-			   pulongest (kp.ki_rusage.ru_maxrss));
-	  printf_filtered ("Pending Signals: ");
+	  gdb_printf ("Virtual memory size: %s kB\n",
+		      pulongest (kp.ki_size / 1024));
+	  gdb_printf ("Data size: %s kB\n",
+		      pulongest (kp.ki_dsize * pgtok));
+	  gdb_printf ("Stack size: %s kB\n",
+		      pulongest (kp.ki_ssize * pgtok));
+	  gdb_printf ("Text size: %s kB\n",
+		      pulongest (kp.ki_tsize * pgtok));
+	  gdb_printf ("Resident set size: %s kB\n",
+		      pulongest (kp.ki_rssize * pgtok));
+	  gdb_printf ("Maximum RSS: %s kB\n",
+		      pulongest (kp.ki_rusage.ru_maxrss));
+	  gdb_printf ("Pending Signals: ");
 	  for (int i = 0; i < _SIG_WORDS; i++)
-	    printf_filtered ("%08x ", kp.ki_siglist.__bits[i]);
-	  printf_filtered ("\n");
-	  printf_filtered ("Ignored Signals: ");
+	    gdb_printf ("%08x ", kp.ki_siglist.__bits[i]);
+	  gdb_printf ("\n");
+	  gdb_printf ("Ignored Signals: ");
 	  for (int i = 0; i < _SIG_WORDS; i++)
-	    printf_filtered ("%08x ", kp.ki_sigignore.__bits[i]);
-	  printf_filtered ("\n");
-	  printf_filtered ("Caught Signals: ");
+	    gdb_printf ("%08x ", kp.ki_sigignore.__bits[i]);
+	  gdb_printf ("\n");
+	  gdb_printf ("Caught Signals: ");
 	  for (int i = 0; i < _SIG_WORDS; i++)
-	    printf_filtered ("%08x ", kp.ki_sigcatch.__bits[i]);
-	  printf_filtered ("\n");
+	    gdb_printf ("%08x ", kp.ki_sigcatch.__bits[i]);
+	  gdb_printf ("\n");
 	}
     }
 
@@ -717,15 +722,15 @@ static void
 show_fbsd_lwp_debug (struct ui_file *file, int from_tty,
 		     struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Debugging of FreeBSD lwp module is %s.\n"), value);
+  gdb_printf (file, _("Debugging of FreeBSD lwp module is %s.\n"), value);
 }
 
 static void
 show_fbsd_nat_debug (struct ui_file *file, int from_tty,
 		     struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Debugging of FreeBSD native target is %s.\n"),
-		    value);
+  gdb_printf (file, _("Debugging of FreeBSD native target is %s.\n"),
+	      value);
 }
 
 #define fbsd_lwp_debug_printf(fmt, ...) \
@@ -966,9 +971,9 @@ handle_target_event (int error, gdb_client_data client_data)
 /* Implement the "async" target method.  */
 
 void
-fbsd_nat_target::async (int enable)
+fbsd_nat_target::async (bool enable)
 {
-  if ((enable != 0) == is_async_p ())
+  if (enable == is_async_p ())
     return;
 
   /* Block SIGCHILD while we create/destroy the pipe, as the handler
@@ -978,7 +983,7 @@ fbsd_nat_target::async (int enable)
   if (enable)
     {
       if (!async_file_open ())
-	internal_error (__FILE__, __LINE__, "failed to create event pipe.");
+	internal_error ("failed to create event pipe.");
 
       add_file_handler (async_wait_fd (), handle_target_event, NULL, "fbsd-nat");
 
@@ -1138,6 +1143,8 @@ fbsd_nat_target::resume (ptid_t ptid, int step, enum gdb_signal signo)
 	    perror_with_name (request == PT_RESUME ?
 			      ("ptrace (PT_RESUME)") :
 			      ("ptrace (PT_SUSPEND)"));
+	  if (request == PT_RESUME)
+	    low_prepare_to_resume (tp);
 	}
     }
   else
@@ -1145,8 +1152,11 @@ fbsd_nat_target::resume (ptid_t ptid, int step, enum gdb_signal signo)
       /* If ptid is a wildcard, resume all matching threads (they won't run
 	 until the process is continued however).  */
       for (thread_info *tp : all_non_exited_threads (this, ptid))
-	if (ptrace (PT_RESUME, tp->ptid.lwp (), NULL, 0) == -1)
-	  perror_with_name (("ptrace (PT_RESUME)"));
+	{
+	  if (ptrace (PT_RESUME, tp->ptid.lwp (), NULL, 0) == -1)
+	    perror_with_name (("ptrace (PT_RESUME)"));
+	  low_prepare_to_resume (tp);
+	}
       ptid = inferior_ptid;
     }
 
@@ -1291,8 +1301,9 @@ fbsd_nat_target::wait_1 (ptid_t ptid, struct target_waitstatus *ourstatus,
 		  fbsd_lwp_debug_printf ("deleting thread for LWP %u",
 					 pl.pl_lwpid);
 		  if (print_thread_events)
-		    printf_unfiltered (_("[%s exited]\n"),
-				       target_pid_to_str (wptid).c_str ());
+		    gdb_printf (_("[%s exited]\n"),
+				target_pid_to_str (wptid).c_str ());
+		  low_delete_thread (thr);
 		  delete_thread (thr);
 		}
 	      if (ptrace (PT_CONTINUE, pid, (caddr_t) 1, 0) == -1)
@@ -1379,6 +1390,8 @@ fbsd_nat_target::wait_1 (ptid_t ptid, struct target_waitstatus *ourstatus,
 	      else
 		warning (_("Failed to fetch process information"));
 #endif
+
+	      low_new_fork (wptid, child);
 
 	      if (is_vfork)
 		ourstatus->set_vforked (child_ptid);
@@ -1719,19 +1732,20 @@ fbsd_nat_target::supports_disable_randomization ()
 bool
 fbsd_nat_target::fetch_register_set (struct regcache *regcache, int regnum,
 				     int fetch_op, const struct regset *regset,
-				     void *regs, size_t size)
+				     int regbase, void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       if (ptrace (fetch_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->supply_regset (regset, regnum, regs, size);
+      regset->supply_regset (regset, regcache, regnum, regs, size);
       return true;
     }
   return false;
@@ -1742,26 +1756,115 @@ fbsd_nat_target::fetch_register_set (struct regcache *regcache, int regnum,
 bool
 fbsd_nat_target::store_register_set (struct regcache *regcache, int regnum,
 				     int fetch_op, int store_op,
-				     const struct regset *regset, void *regs,
-				     size_t size)
+				     const struct regset *regset, int regbase,
+				     void *regs, size_t size)
 {
   const struct regcache_map_entry *map
     = (const struct regcache_map_entry *) regset->regmap;
   pid_t pid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regcache_map_supplies (map, regnum, regcache->arch(),
-					     size))
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
     {
       if (ptrace (fetch_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't get registers"));
 
-      regcache->collect_regset (regset, regnum, regs, size);
+      regset->collect_regset (regset, regcache, regnum, regs, size);
 
       if (ptrace (store_op, pid, (PTRACE_TYPE_ARG3) regs, 0) == -1)
 	perror_with_name (_("Couldn't write registers"));
       return true;
     }
   return false;
+}
+
+/* See fbsd-nat.h.  */
+
+size_t
+fbsd_nat_target::have_regset (ptid_t ptid, int note)
+{
+  pid_t pid = get_ptrace_pid (ptid);
+  struct iovec iov;
+
+  iov.iov_base = nullptr;
+  iov.iov_len = 0;
+  if (ptrace (PT_GETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
+    return 0;
+  return iov.iov_len;
+}
+
+/* See fbsd-nat.h.  */
+
+bool
+fbsd_nat_target::fetch_regset (struct regcache *regcache, int regnum, int note,
+			       const struct regset *regset, int regbase,
+			       void *regs, size_t size)
+{
+  const struct regcache_map_entry *map
+    = (const struct regcache_map_entry *) regset->regmap;
+  pid_t pid = get_ptrace_pid (regcache->ptid ());
+
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
+    {
+      struct iovec iov;
+
+      iov.iov_base = regs;
+      iov.iov_len = size;
+      if (ptrace (PT_GETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
+	perror_with_name (_("Couldn't get registers"));
+
+      regset->supply_regset (regset, regcache, regnum, regs, size);
+      return true;
+    }
+  return false;
+}
+
+bool
+fbsd_nat_target::store_regset (struct regcache *regcache, int regnum, int note,
+			       const struct regset *regset, int regbase,
+			       void *regs, size_t size)
+{
+  const struct regcache_map_entry *map
+    = (const struct regcache_map_entry *) regset->regmap;
+  pid_t pid = get_ptrace_pid (regcache->ptid ());
+
+  if (regnum == -1
+      || (regnum >= regbase && regcache_map_supplies (map, regnum - regbase,
+						      regcache->arch(), size)))
+    {
+      struct iovec iov;
+
+      iov.iov_base = regs;
+      iov.iov_len = size;
+      if (ptrace (PT_GETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
+	perror_with_name (_("Couldn't get registers"));
+
+      regset->collect_regset (regset, regcache, regnum, regs, size);
+
+      if (ptrace (PT_SETREGSET, pid, (PTRACE_TYPE_ARG3) &iov, note) == -1)
+	perror_with_name (_("Couldn't write registers"));
+      return true;
+    }
+  return false;
+}
+
+/* See fbsd-nat.h.  */
+
+bool
+fbsd_nat_get_siginfo (ptid_t ptid, siginfo_t *siginfo)
+{
+  struct ptrace_lwpinfo pl;
+  pid_t pid = get_ptrace_pid (ptid);
+
+  if (ptrace (PT_LWPINFO, pid, (caddr_t) &pl, sizeof pl) == -1)
+    return false;
+  if (!(pl.pl_flags & PL_FLAG_SI))
+    return false;;
+  *siginfo = pl.pl_siginfo;
+  return (true);
 }
 
 void _initialize_fbsd_nat ();

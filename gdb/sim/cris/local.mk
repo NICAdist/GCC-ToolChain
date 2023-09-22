@@ -1,6 +1,6 @@
 ## See sim/Makefile.am
 ##
-## Copyright (C) 2004-2022 Free Software Foundation, Inc.
+## Copyright (C) 2004-2023 Free Software Foundation, Inc.
 ## Contributed by Axis Communications.
 ##
 ## This program is free software; you can redistribute it and/or modify
@@ -15,6 +15,21 @@
 ##
 ## You should have received a copy of the GNU General Public License
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+%C%_run_SOURCES =
+%C%_run_LDADD = \
+	%D%/nrun.o \
+	%D%/libsim.a \
+	$(SIM_COMMON_LIBS)
+
+noinst_PROGRAMS += %D%/run
+
+## rvdummy is just used for testing -- it runs on the same host as `run`.
+## It does nothing if --enable-sim-hardware isn't active.
+%C%_rvdummy_SOURCES = %D%/rvdummy.c
+%C%_rvdummy_LDADD = $(LIBIBERTY_LIB)
+
+check_PROGRAMS += %D%/rvdummy
 
 %C%_BUILD_OUTPUTS = \
 	%D%/engv10.h \

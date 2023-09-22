@@ -1,6 +1,6 @@
 /* Support for printing Pascal values for GDB, the GNU debugger.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -91,8 +91,8 @@ pascal_language::value_print_inner (struct value *val,
 	if (get_array_bounds (type, &low_bound, &high_bound))
 	  {
 	    len = high_bound - low_bound + 1;
-	    elttype = check_typedef (TYPE_TARGET_TYPE (type));
-	    eltlen = TYPE_LENGTH (elttype);
+	    elttype = check_typedef (type->target_type ());
+	    eltlen = elttype->length ();
 	    /* If 's' format is used, try to print out as string.
 	       If no format is given, print as string if element type
 	       is of TYPE_CODE_CHAR and element size is 1,2 or 4.  */
@@ -116,26 +116,26 @@ pascal_language::value_print_inner (struct value *val,
 		    len = temp_len;
 		  }
 
-		printstr (stream, TYPE_TARGET_TYPE (type), valaddr, len,
+		printstr (stream, type->target_type (), valaddr, len,
 			  NULL, 0, options);
 		i = len;
 	      }
 	    else
 	      {
-		fprintf_filtered (stream, "{");
+		gdb_printf (stream, "{");
 		/* If this is a virtual function table, print the 0th
 		   entry specially, and the rest of the members normally.  */
 		if (pascal_object_is_vtbl_ptr_type (elttype))
 		  {
 		    i = 1;
-		    fprintf_filtered (stream, "%d vtable entries", len - 1);
+		    gdb_printf (stream, "%d vtable entries", len - 1);
 		  }
 		else
 		  {
 		    i = 0;
 		  }
 		value_print_array_elements (val, stream, recurse, options, i);
-		fprintf_filtered (stream, "}");
+		gdb_printf (stream, "}");
 	      }
 	    break;
 	  }
@@ -157,15 +157,15 @@ pascal_language::value_print_inner (struct value *val,
 	     -fvtable_thunks.  (Otherwise, look under TYPE_CODE_STRUCT.)  */
 	  /* Extract the address, assume that it is unsigned.  */
 	  addr = extract_unsigned_integer (valaddr,
-					   TYPE_LENGTH (type), byte_order);
+					   type->length (), byte_order);
 	  print_address_demangle (options, gdbarch, addr, stream, demangle);
 	  break;
 	}
-      check_typedef (TYPE_TARGET_TYPE (type));
+      check_typedef (type->target_type ());
 
       addr = unpack_pointer (type, valaddr);
     print_unpacked_pointer:
-      elttype = check_typedef (TYPE_TARGET_TYPE (type));
+      elttype = check_typedef (type->target_type ());
 
       if (elttype->code () == TYPE_CODE_FUNC)
 	{
@@ -176,22 +176,22 @@ pascal_language::value_print_inner (struct value *val,
 
       if (options->addressprint && options->format != 's')
 	{
-	  fputs_filtered (paddress (gdbarch, addr), stream);
+	  gdb_puts (paddress (gdbarch, addr), stream);
 	  want_space = 1;
 	}
 
       /* For a pointer to char or unsigned char, also print the string
 	 pointed to, unless pointer is null.  */
-      if (((TYPE_LENGTH (elttype) == 1
+      if (((elttype->length () == 1
 	   && (elttype->code () == TYPE_CODE_INT
 	       || elttype->code () == TYPE_CODE_CHAR))
-	   || ((TYPE_LENGTH (elttype) == 2 || TYPE_LENGTH (elttype) == 4)
+	   || ((elttype->length () == 2 || elttype->length () == 4)
 	       && elttype->code () == TYPE_CODE_CHAR))
 	  && (options->format == 0 || options->format == 's')
 	  && addr != 0)
 	{
 	  if (want_space)
-	    fputs_filtered (" ", stream);
+	    gdb_puts (" ", stream);
 	  /* No wide string yet.  */
 	  i = val_print_string (elttype, NULL, addr, -1, stream, options);
 	}
@@ -208,7 +208,7 @@ pascal_language::value_print_inner (struct value *val,
 	  gdb_byte *buffer;
 
 	  if (want_space)
-	    fputs_filtered (" ", stream);
+	    gdb_puts (" ", stream);
 	  buffer = (gdb_byte *) xmalloc (length_size);
 	  read_memory (addr + length_pos, buffer, length_size);
 	  string_length = extract_unsigned_integer (buffer, length_size,
@@ -228,13 +228,13 @@ pascal_language::value_print_inner (struct value *val,
 	  /* If 'symbol_print' is set, we did the work above.  */
 	  if (!options->symbol_print
 	      && (msymbol.minsym != NULL)
-	      && (vt_address == BMSYMBOL_VALUE_ADDRESS (msymbol)))
+	      && (vt_address == msymbol.value_address ()))
 	    {
 	      if (want_space)
-		fputs_filtered (" ", stream);
-	      fputs_filtered ("<", stream);
-	      fputs_filtered (msymbol.minsym->print_name (), stream);
-	      fputs_filtered (">", stream);
+		gdb_puts (" ", stream);
+	      gdb_puts ("<", stream);
+	      gdb_puts (msymbol.minsym->print_name (), stream);
+	      gdb_puts (">", stream);
 	      want_space = 1;
 	    }
 	  if (vt_address && options->vtblprint)
@@ -244,7 +244,7 @@ pascal_language::value_print_inner (struct value *val,
 	      struct type *wtype;
 
 	      if (want_space)
-		fputs_filtered (" ", stream);
+		gdb_puts (" ", stream);
 
 	      if (msymbol.minsym != NULL)
 		{
@@ -259,15 +259,15 @@ pascal_language::value_print_inner (struct value *val,
 		}
 	      else
 		{
-		  wtype = TYPE_TARGET_TYPE (type);
+		  wtype = type->target_type ();
 		}
 	      vt_val = value_at (wtype, vt_address);
 	      common_val_print (vt_val, stream, recurse + 1, options,
 				current_language);
 	      if (options->prettyformat)
 		{
-		  fprintf_filtered (stream, "\n");
-		  print_spaces_filtered (2 + 2 * recurse, stream);
+		  gdb_printf (stream, "\n");
+		  print_spaces (2 + 2 * recurse, stream);
 		}
 	    }
 	}
@@ -292,7 +292,7 @@ pascal_language::value_print_inner (struct value *val,
     case TYPE_CODE_UNION:
       if (recurse && !options->unionprint)
 	{
-	  fprintf_filtered (stream, "{...}");
+	  gdb_printf (stream, "{...}");
 	  break;
 	}
       /* Fall through.  */
@@ -307,7 +307,7 @@ pascal_language::value_print_inner (struct value *val,
 	    (options, gdbarch,
 	     extract_unsigned_integer
 	       (valaddr + type->field (VTBL_FNADDR_OFFSET).loc_bitpos () / 8,
-		TYPE_LENGTH (type->field (VTBL_FNADDR_OFFSET).type ()),
+		type->field (VTBL_FNADDR_OFFSET).type ()->length (),
 		byte_order),
 	     stream, demangle);
 	}
@@ -341,16 +341,16 @@ pascal_language::value_print_inner (struct value *val,
 	  LONGEST low_bound, high_bound;
 	  int need_comma = 0;
 
-	  fputs_filtered ("[", stream);
+	  gdb_puts ("[", stream);
 
 	  int bound_info = (get_discrete_bounds (range, &low_bound, &high_bound)
 			    ? 0 : -1);
-	  if (low_bound == 0 && high_bound == -1 && TYPE_LENGTH (type) > 0)
+	  if (low_bound == 0 && high_bound == -1 && type->length () > 0)
 	    {
 	      /* If we know the size of the set type, we can figure out the
 	      maximum value.  */
 	      bound_info = 0;
-	      high_bound = TYPE_LENGTH (type) * TARGET_CHAR_BIT - 1;
+	      high_bound = type->length () * TARGET_CHAR_BIT - 1;
 	      range->bounds ()->high.set_const_val (high_bound);
 	    }
 	maybe_bad_bstring:
@@ -372,7 +372,7 @@ pascal_language::value_print_inner (struct value *val,
 	      if (element)
 		{
 		  if (need_comma)
-		    fputs_filtered (", ", stream);
+		    gdb_puts (", ", stream);
 		  print_type_scalar (range, i, stream);
 		  need_comma = 1;
 
@@ -381,7 +381,7 @@ pascal_language::value_print_inner (struct value *val,
 		    {
 		      int j = i;
 
-		      fputs_filtered ("..", stream);
+		      gdb_puts ("..", stream);
 		      while (i + 1 <= high_bound
 			     && value_bit_index (type, valaddr, ++i))
 			j = i;
@@ -390,7 +390,7 @@ pascal_language::value_print_inner (struct value *val,
 		}
 	    }
 	done:
-	  fputs_filtered ("]", stream);
+	  gdb_puts ("]", stream);
 	}
       break;
 
@@ -423,16 +423,16 @@ pascal_language::value_print (struct value *val, struct ui_file *stream,
 	 type is indicated by the quoted string anyway.  */
       if (type->code () == TYPE_CODE_PTR
 	  && type->name () == NULL
-	  && TYPE_TARGET_TYPE (type)->name () != NULL
-	  && strcmp (TYPE_TARGET_TYPE (type)->name (), "char") == 0)
+	  && type->target_type ()->name () != NULL
+	  && strcmp (type->target_type ()->name (), "char") == 0)
 	{
 	  /* Print nothing.  */
 	}
       else
 	{
-	  fprintf_filtered (stream, "(");
+	  gdb_printf (stream, "(");
 	  type_print (type, "", stream, -1);
-	  fprintf_filtered (stream, ") ");
+	  gdb_printf (stream, ") ");
 	}
     }
   common_val_print (val, stream, 0, &opts, current_language);
@@ -443,8 +443,8 @@ static void
 show_pascal_static_field_print (struct ui_file *file, int from_tty,
 				struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Printing of pascal static members is %s.\n"),
-		    value);
+  gdb_printf (file, _("Printing of pascal static members is %s.\n"),
+	      value);
 }
 
 static struct obstack dont_print_vb_obstack;
@@ -482,10 +482,10 @@ pascal_object_is_vtbl_member (struct type *type)
 {
   if (type->code () == TYPE_CODE_PTR)
     {
-      type = TYPE_TARGET_TYPE (type);
+      type = type->target_type ();
       if (type->code () == TYPE_CODE_ARRAY)
 	{
-	  type = TYPE_TARGET_TYPE (type);
+	  type = type->target_type ();
 	  if (type->code () == TYPE_CODE_STRUCT	/* If not using
 							   thunks.  */
 	      || type->code () == TYPE_CODE_PTR)	/* If using thunks.  */
@@ -520,7 +520,7 @@ pascal_object_print_value_fields (struct value *val, struct ui_file *stream,
 
   struct type *type = check_typedef (value_type (val));
 
-  fprintf_filtered (stream, "{");
+  gdb_printf (stream, "{");
   len = type->num_fields ();
   n_baseclasses = TYPE_N_BASECLASSES (type);
 
@@ -553,24 +553,24 @@ pascal_object_print_value_fields (struct value *val, struct ui_file *stream,
 	      && field_is_static (&type->field (i)))
 	    continue;
 	  if (fields_seen)
-	    fprintf_filtered (stream, ", ");
+	    gdb_printf (stream, ", ");
 	  else if (n_baseclasses > 0)
 	    {
 	      if (options->prettyformat)
 		{
-		  fprintf_filtered (stream, "\n");
-		  print_spaces_filtered (2 + 2 * recurse, stream);
-		  fputs_filtered ("members of ", stream);
-		  fputs_filtered (type->name (), stream);
-		  fputs_filtered (": ", stream);
+		  gdb_printf (stream, "\n");
+		  print_spaces (2 + 2 * recurse, stream);
+		  gdb_puts ("members of ", stream);
+		  gdb_puts (type->name (), stream);
+		  gdb_puts (": ", stream);
 		}
 	    }
 	  fields_seen = 1;
 
 	  if (options->prettyformat)
 	    {
-	      fprintf_filtered (stream, "\n");
-	      print_spaces_filtered (2 + 2 * recurse, stream);
+	      gdb_printf (stream, "\n");
+	      print_spaces (2 + 2 * recurse, stream);
 	    }
 	  else
 	    {
@@ -581,17 +581,17 @@ pascal_object_print_value_fields (struct value *val, struct ui_file *stream,
 
 	  if (field_is_static (&type->field (i)))
 	    {
-	      fputs_filtered ("static ", stream);
-	      fprintf_symbol_filtered (stream,
-				       type->field (i).name (),
-				       current_language->la_language,
-				       DMGL_PARAMS | DMGL_ANSI);
+	      gdb_puts ("static ", stream);
+	      fprintf_symbol (stream,
+			      type->field (i).name (),
+			      current_language->la_language,
+			      DMGL_PARAMS | DMGL_ANSI);
 	    }
 	  else
 	    fputs_styled (type->field (i).name (),
 			  variable_name_style.style (), stream);
 	  annotate_field_name_end ();
-	  fputs_filtered (" = ", stream);
+	  gdb_puts (" = ", stream);
 	  annotate_field_value ();
 
 	  if (!field_is_static (&type->field (i))
@@ -670,11 +670,11 @@ pascal_object_print_value_fields (struct value *val, struct ui_file *stream,
 
       if (options->prettyformat)
 	{
-	  fprintf_filtered (stream, "\n");
-	  print_spaces_filtered (2 * recurse, stream);
+	  gdb_printf (stream, "\n");
+	  print_spaces (2 * recurse, stream);
 	}
     }
-  fprintf_filtered (stream, "}");
+  gdb_printf (stream, "}");
 }
 
 /* Special val_print routine to avoid printing multiple copies of virtual
@@ -743,13 +743,13 @@ pascal_object_print_value (struct value *val, struct ui_file *stream,
 	     user program. Make sure that it still points to a valid memory
 	     location.  */
 
-	  if (boffset < 0 || boffset >= TYPE_LENGTH (type))
+	  if (boffset < 0 || boffset >= type->length ())
 	    {
 	      CORE_ADDR address= value_address (val);
-	      gdb::byte_vector buf (TYPE_LENGTH (baseclass));
+	      gdb::byte_vector buf (baseclass->length ());
 
 	      if (target_read_memory (address + boffset, buf.data (),
-				      TYPE_LENGTH (baseclass)) != 0)
+				      baseclass->length ()) != 0)
 		skip = 1;
 	      base_value = value_from_contents_and_address (baseclass,
 							    buf.data (),
@@ -761,15 +761,15 @@ pascal_object_print_value (struct value *val, struct ui_file *stream,
 
       if (options->prettyformat)
 	{
-	  fprintf_filtered (stream, "\n");
-	  print_spaces_filtered (2 * recurse, stream);
+	  gdb_printf (stream, "\n");
+	  print_spaces (2 * recurse, stream);
 	}
-      fputs_filtered ("<", stream);
+      gdb_puts ("<", stream);
       /* Not sure what the best notation is in the case where there is no
 	 baseclass name.  */
 
-      fputs_filtered (basename ? basename : "", stream);
-      fputs_filtered ("> = ", stream);
+      gdb_puts (basename ? basename : "", stream);
+      gdb_puts ("> = ", stream);
 
       if (skip < 0)
 	val_print_unavailable (stream);
@@ -780,7 +780,7 @@ pascal_object_print_value (struct value *val, struct ui_file *stream,
 	  (base_value, stream, recurse, options,
 	   (struct type **) obstack_base (&dont_print_vb_obstack),
 	   0);
-      fputs_filtered (", ", stream);
+      gdb_puts (", ", stream);
 
     flush_it:
       ;

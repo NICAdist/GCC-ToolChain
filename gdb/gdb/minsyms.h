@@ -1,6 +1,6 @@
 /* Minimal symbol table definitions for GDB.
 
-   Copyright (C) 2011-2022 Free Software Foundation, Inc.
+   Copyright (C) 2011-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,6 +35,13 @@ struct bound_minimal_symbol
   }
 
   bound_minimal_symbol () = default;
+
+  /* Return the address of the minimal symbol in the context of the objfile.  */
+
+  CORE_ADDR value_address () const
+  {
+    return this->minsym->value_address (this->objfile);
+  }
 
   /* The minimal symbol that was found, or NULL if no minimal symbol
      was found.  */

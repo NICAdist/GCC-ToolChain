@@ -1,5 +1,5 @@
 /* Loop invariant motion.
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -853,10 +853,15 @@ determine_max_movement (gimple *stmt, bool must_preserve_exec)
 
       return true;
     }
-  else
-    FOR_EACH_SSA_TREE_OPERAND (val, stmt, iter, SSA_OP_USE)
-      if (!add_dependency (val, lim_data, loop, true))
-	return false;
+
+  /* A stmt that receives abnormal edges cannot be hoisted.  */
+  if (is_a <gcall *> (stmt)
+      && (gimple_call_flags (stmt) & ECF_RETURNS_TWICE))
+    return false;
+
+  FOR_EACH_SSA_TREE_OPERAND (val, stmt, iter, SSA_OP_USE)
+    if (!add_dependency (val, lim_data, loop, true))
+      return false;
 
   if (gimple_vuse (stmt))
     {
@@ -1259,8 +1264,11 @@ move_computations_worker (basic_block bb)
 	     edges of COND.  */
 	  extract_true_false_args_from_phi (dom, stmt, &arg0, &arg1);
 	  gcc_assert (arg0 && arg1);
-	  t = build2 (gimple_cond_code (cond), boolean_type_node,
-		      gimple_cond_lhs (cond), gimple_cond_rhs (cond));
+	  t = make_ssa_name (boolean_type_node);
+	  new_stmt = gimple_build_assign (t, gimple_cond_code (cond),
+					  gimple_cond_lhs (cond),
+					  gimple_cond_rhs (cond));
+	  gsi_insert_on_edge (loop_preheader_edge (level), new_stmt);
 	  new_stmt = gimple_build_assign (gimple_phi_result (stmt),
 					  COND_EXPR, t, arg0, arg1);
 	  todo |= TODO_cleanup_cfg;
@@ -3619,9 +3627,9 @@ public:
   {}
 
   /* opt_pass methods: */
-  opt_pass * clone () { return new pass_lim (m_ctxt); }
-  virtual bool gate (function *) { return flag_tree_loop_im != 0; }
-  virtual unsigned int execute (function *);
+  opt_pass * clone () final override { return new pass_lim (m_ctxt); }
+  bool gate (function *) final override { return flag_tree_loop_im != 0; }
+  unsigned int execute (function *) final override;
 
 }; // class pass_lim
 

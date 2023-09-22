@@ -1,6 +1,6 @@
 /* Target-dependent header for the MIPS architecture, for GDB, the GNU Debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -50,8 +50,17 @@ enum mips_isa
   };
 
 /* Corresponding MSYMBOL_TARGET_FLAG aliases.  */
-#define MSYMBOL_TARGET_FLAG_MIPS16 MSYMBOL_TARGET_FLAG_1
-#define MSYMBOL_TARGET_FLAG_MICROMIPS MSYMBOL_TARGET_FLAG_2
+#define MSYMBOL_TARGET_FLAG_MIPS16(sym) \
+	(sym)->target_flag_1 ()
+
+#define SET_MSYMBOL_TARGET_FLAG_MIPS16(sym) \
+	(sym)->set_target_flag_1 (true)
+
+#define MSYMBOL_TARGET_FLAG_MICROMIPS(sym) \
+	(sym)->target_flag_2 ()
+
+#define SET_MSYMBOL_TARGET_FLAG_MICROMIPS(sym) \
+	(sym)->set_target_flag_2 (true)
 
 /* Return the MIPS ISA's register size.  Just a short cut to the BFD
    architecture's word size.  */
@@ -84,7 +93,7 @@ enum mips_fpu_type
 };
 
 /* MIPS specific per-architecture information.  */
-struct mips_gdbarch_tdep : gdbarch_tdep
+struct mips_gdbarch_tdep : gdbarch_tdep_base
 {
   /* from the elf header */
   int elf_flags = 0;
@@ -116,7 +125,7 @@ struct mips_gdbarch_tdep : gdbarch_tdep
 
   /* Return the expected next PC if FRAME is stopped at a syscall
      instruction.  */
-  CORE_ADDR (*syscall_next_pc) (struct frame_info *frame) = nullptr;
+  CORE_ADDR (*syscall_next_pc) (frame_info_ptr frame) = nullptr;
 };
 
 /* Register numbers of various important registers.  */

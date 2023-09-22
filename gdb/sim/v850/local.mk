@@ -1,6 +1,6 @@
 ## See sim/Makefile.am
 ##
-## Copyright (C) 1996-2022 Free Software Foundation, Inc.
+## Copyright (C) 1996-2023 Free Software Foundation, Inc.
 ## Written by Cygnus Support.
 ##
 ## This program is free software; you can redistribute it and/or modify
@@ -15,6 +15,14 @@
 ##
 ## You should have received a copy of the GNU General Public License
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+%C%_run_SOURCES =
+%C%_run_LDADD = \
+	%D%/nrun.o \
+	%D%/libsim.a \
+	$(SIM_COMMON_LIBS)
+
+noinst_PROGRAMS += %D%/run
 
 %C%_BUILT_SRC_FROM_IGEN = \
 	%D%/icache.h \
@@ -43,7 +51,7 @@ $(%C%_BUILT_SRC_FROM_IGEN): %D%/stamp-igen
 
 %C%_IGEN_TRACE = # -G omit-line-numbers # -G trace-rule-selection -G trace-rule-rejection -G trace-entries
 %C%_IGEN_INSN = $(srcdir)/%D%/v850.igen
-%C%_IGEN_DC = $(srcdir)/%D%/v850-dc
+%C%_IGEN_DC = $(srcdir)/%D%/v850.dc
 %D%/stamp-igen: $(%C%_IGEN_INSN) $(%C%_IGEN_DC) $(IGEN)
 	$(AM_V_GEN)$(IGEN_RUN) \
 		$(%C%_IGEN_TRACE) \

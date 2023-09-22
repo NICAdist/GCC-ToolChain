@@ -1,6 +1,6 @@
 # This testcase is part of GDB, the GNU debugger.
 
-# Copyright 2022 Free Software Foundation, Inc.
+# Copyright 2022-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -74,7 +74,11 @@ proc do_test { target } {
     }
 }
 
-# Test with the two remote protocol types.
-foreach_with_prefix target { remote extended-remote } {
-    do_test ${target}
+save_vars { GDBFLAGS } {
+    set GDBFLAGS "$GDBFLAGS -ex \"set sysroot\""
+
+    # Test with the two remote protocol types.
+    foreach_with_prefix target { remote extended-remote } {
+	do_test ${target}
+    }
 }

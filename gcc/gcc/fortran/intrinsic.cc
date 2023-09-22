@@ -1,6 +1,6 @@
 /* Build up a list of intrinsic subroutines and functions for the
    name-resolution stage.
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
    Contributed by Andy Vaught & Katherine Holcomb
 
 This file is part of GCC.
@@ -25,6 +25,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "options.h"
 #include "gfortran.h"
 #include "intrinsic.h"
+#include "diagnostic.h" /* For errorcount.  */
 
 /* Namespace to hold the resolved symbols for intrinsic subroutines.  */
 static gfc_namespace *gfc_intrinsic_namespace;
@@ -4620,6 +4621,7 @@ do_simplify (gfc_intrinsic_sym *specific, gfc_expr *e)
 {
   gfc_expr *result, *a1, *a2, *a3, *a4, *a5, *a6;
   gfc_actual_arglist *arg;
+  int old_errorcount = errorcount;
 
   /* Max and min require special handling due to the variable number
      of args.  */
@@ -4708,7 +4710,12 @@ do_simplify (gfc_intrinsic_sym *specific, gfc_expr *e)
 
 finish:
   if (result == &gfc_bad_expr)
-    return false;
+    {
+      if (errorcount == old_errorcount
+	  && (!gfc_buffered_p () || !gfc_error_flag_test ()))
+       gfc_error ("Cannot simplify expression at %L", &e->where);
+      return false;
+    }
 
   if (result == NULL)
     resolve_intrinsic (specific, e);	/* Must call at run-time */
@@ -5419,7 +5426,8 @@ gfc_convert_chartype (gfc_expr *expr, gfc_typespec *ts)
   gcc_assert (expr->ts.type == BT_CHARACTER && ts->type == BT_CHARACTER);
 
   sym = find_char_conv (&expr->ts, ts);
-  gcc_assert (sym);
+  if (sym == NULL)
+    return false;
 
   /* Insert a pre-resolved function call to the right function.  */
   old_where = expr->where;

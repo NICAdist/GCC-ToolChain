@@ -1,4 +1,4 @@
-# Copyright 2022 Free Software Foundation, Inc.
+# Copyright 2022-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -40,7 +40,7 @@ proc run_test { args } {
 
     gdb_exit
     if [mi_gdb_start $args] {
-	continue
+	return
     }
 
     set start 1
@@ -100,9 +100,12 @@ proc run_test { args } {
 	set seen_second_message false
 
 	gdb_test_multiple "" "look for first command output, command length $i" -prompt "$mi_gdb_prompt" {
-	    -re "\\^done,value=\"\\\\\"FIRST COMMAND\\\\\"\"\r\n" {
-		pass $gdb_test_name
+	    -re "\\^done.*,value=\"\\\\\"FIRST COMMAND\\\\\"\"" {
 		set seen_first_message true
+		exp_continue
+	    }
+	    -re "\r\n$mi_gdb_prompt" {
+		gdb_assert $seen_first_message $gdb_test_name
 	    }
 	}
 

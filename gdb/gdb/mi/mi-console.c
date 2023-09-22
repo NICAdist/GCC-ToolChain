@@ -1,6 +1,6 @@
 /* MI Console code.
 
-   Copyright (C) 2000-2022 Free Software Foundation, Inc.
+   Copyright (C) 2000-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Solutions (a Red Hat company).
 
@@ -76,18 +76,18 @@ mi_console_file::flush ()
       size_t length_buf = str.size ();
       const char *buf = str.data ();
 
-      fputs_unfiltered (m_prefix, m_raw);
+      gdb_puts (m_prefix, m_raw);
       if (m_quote)
 	{
-	  fputc_unfiltered (m_quote, m_raw);
+	  gdb_putc (m_quote, m_raw);
 	  m_raw->putstrn (buf, length_buf, m_quote);
-	  fputc_unfiltered (m_quote, m_raw);
-	  fputc_unfiltered ('\n', m_raw);
+	  gdb_putc (m_quote, m_raw);
+	  gdb_putc ('\n', m_raw);
 	}
       else
 	{
 	  m_raw->putstrn (buf, length_buf, 0);
-	  fputc_unfiltered ('\n', m_raw);
+	  gdb_putc ('\n', m_raw);
 	}
       gdb_flush (m_raw);
     }

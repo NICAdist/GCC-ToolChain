@@ -57,7 +57,7 @@ ZLIBINC = @zlibinc@
 
 WARN_CFLAGS = @WARN_CFLAGS@
 NO_WERROR = @NO_WERROR@
-AM_CFLAGS = $(WARN_CFLAGS) $(ZLIBINC)
+AM_CFLAGS = $(WARN_CFLAGS) $(ZLIBINC) $(ZSTD_CFLAGS)
 AM_CPPFLAGS = -DBINDIR='"$(bindir)"' -DLIBDIR='"$(libdir)"' @LARGEFILE_CPPFLAGS@
 if PLUGINS
 bfdinclude_HEADERS += $(INCDIR)/plugin-api.h
@@ -118,8 +118,6 @@ ALL_MACHINES = \
 	cpu-hppa.lo \
 	cpu-i386.lo \
 	cpu-iamcu.lo \
-	cpu-l1om.lo \
-	cpu-k1om.lo \
 	cpu-ia64.lo \
 	cpu-ip2k.lo \
 	cpu-iq2000.lo \
@@ -173,7 +171,6 @@ ALL_MACHINES = \
 	cpu-vax.lo \
 	cpu-visium.lo \
 	cpu-wasm32.lo \
-	cpu-xc16x.lo \
 	cpu-xgate.lo \
 	cpu-xstormy16.lo \
 	cpu-xtensa.lo \
@@ -204,8 +201,6 @@ ALL_MACHINES_CFILES = \
 	cpu-hppa.c \
 	cpu-i386.c \
 	cpu-iamcu.c \
-	cpu-l1om.c \
-	cpu-k1om.c \
 	cpu-ia64.c \
 	cpu-ip2k.c \
 	cpu-iq2000.c \
@@ -259,7 +254,6 @@ ALL_MACHINES_CFILES = \
 	cpu-vax.c \
 	cpu-visium.c \
 	cpu-wasm32.c \
-	cpu-xc16x.c \
 	cpu-xgate.c \
 	cpu-xstormy16.c \
 	cpu-xtensa.c \
@@ -292,6 +286,7 @@ BFD32_BACKENDS = \
 	ecofflink.lo \
 	elf-attrs.lo \
 	elf-eh-frame.lo \
+	elf-sframe.lo \
 	elf-ifunc.lo \
 	elf-m10200.lo \
 	elf-m10300.lo \
@@ -356,7 +351,6 @@ BFD32_BACKENDS = \
 	elf32-vax.lo \
 	elf32-visium.lo \
 	elf32-wasm32.lo \
-	elf32-xc16x.lo \
 	elf32-xgate.lo \
 	elf32-xstormy16.lo \
 	elf32-xtensa.lo \
@@ -374,6 +368,7 @@ BFD32_BACKENDS = \
 	mach-o-arm.lo \
 	ns32knetbsd.lo \
 	pc532-mach.lo \
+	pdb.lo \
 	pdp11.lo \
 	pe-arm-wince.lo \
 	pe-arm.lo \
@@ -398,6 +393,7 @@ BFD32_BACKENDS = \
 	wasm-module.lo \
 	xcofflink.lo \
 	xsym.lo \
+	xtensa-dynconfig.lo \
 	xtensa-isa.lo \
 	xtensa-modules.lo
 
@@ -425,6 +421,7 @@ BFD32_BACKENDS_CFILES = \
 	ecofflink.c \
 	elf-attrs.c \
 	elf-eh-frame.c \
+	elf-sframe.c \
 	elf-ifunc.c \
 	elf-m10200.c \
 	elf-m10300.c \
@@ -489,7 +486,6 @@ BFD32_BACKENDS_CFILES = \
 	elf32-vax.c \
 	elf32-visium.c \
 	elf32-wasm32.c \
-	elf32-xc16x.c \
 	elf32-xgate.c \
 	elf32-xstormy16.c \
 	elf32-xtensa.c \
@@ -507,6 +503,7 @@ BFD32_BACKENDS_CFILES = \
 	mach-o-arm.c \
 	ns32knetbsd.c \
 	pc532-mach.c \
+	pdb.c \
 	pdp11.c \
 	pe-arm-wince.c \
 	pe-arm.c \
@@ -530,6 +527,7 @@ BFD32_BACKENDS_CFILES = \
 	wasm-module.c \
 	xcofflink.c \
 	xsym.c \
+	xtensa-dynconfig.c \
 	xtensa-isa.c \
 	xtensa-modules.c
 
@@ -581,9 +579,12 @@ BFD64_BACKENDS = \
 	mach-o-x86-64.lo \
 	mmo.lo \
 	pe-aarch64igen.lo \
+	pe-loongarch64igen.lo \
 	pe-x86_64.lo \
 	pei-aarch64.lo \
+	pe-aarch64.lo \
 	pei-ia64.lo \
+	pei-loongarch64.lo \
 	pei-x86_64.lo \
 	pepigen.lo \
 	pex64igen.lo \
@@ -623,9 +624,11 @@ BFD64_BACKENDS_CFILES = \
 	mach-o-aarch64.c \
 	mach-o-x86-64.c \
 	mmo.c \
+	pe-aarch64.c \
 	pe-x86_64.c \
 	pei-aarch64.c \
 	pei-ia64.c \
+	pei-loongarch64.c \
 	pei-x86_64.c \
 	vms-alpha.c
 
@@ -685,7 +688,7 @@ BUILD_CFILES = \
 	elf32-ia64.c elf64-ia64.c \
 	elf32-loongarch.c elf64-loongarch.c \
 	elf32-riscv.c elf64-riscv.c \
-	peigen.c pepigen.c pex64igen.c pe-aarch64igen.c
+	peigen.c pepigen.c pex64igen.c pe-aarch64igen.c pe-loongarch64igen.c
 
 CFILES = $(SOURCE_CFILES) $(BUILD_CFILES)
 
@@ -722,7 +725,7 @@ BUILD_HFILES = \
 	bfdver.h elf32-target.h elf64-target.h targmatch.h
 
 # Ensure they are built early:
-BUILT_SOURCES = $(BUILD_HFILES)
+BUILT_SOURCES = $(BUILD_HFILES) $(BUILD_CFILES)
 
 HFILES = $(SOURCE_HFILES) $(BUILD_HFILES)
 
@@ -738,12 +741,12 @@ $(BFD32_LIBS) \
 SRC_POTFILES = $(SOURCE_CFILES) $(SOURCE_HFILES)
 BLD_POTFILES = $(BUILD_CFILES) $(BUILD_HFILES)
 
-po/SRC-POTFILES.in: @MAINT@ Makefile $(SRC_POTFILES)
+po/SRC-POTFILES.in: @MAINT@ Makefile
 	for file in $(SRC_POTFILES); do echo $$file; done \
 	  | LC_ALL=C sort > tmp.src \
 	  && mv tmp.src $(srcdir)/po/SRC-POTFILES.in
 
-po/BLD-POTFILES.in: @MAINT@ Makefile $(BLD_POTFILES)
+po/BLD-POTFILES.in: @MAINT@ Makefile
 	for file in $(BLD_POTFILES); do echo $$file; done \
 	  | LC_ALL=C sort > tmp.bld \
 	  && mv tmp.bld $(srcdir)/po/BLD-POTFILES.in
@@ -778,8 +781,8 @@ ofiles: stamp-ofiles ; @true
 # dependency tracking fragments are picked up in the Makefile.
 libbfd_la_SOURCES = $(BFD32_LIBS_CFILES)
 EXTRA_libbfd_la_SOURCES = $(CFILES)
-libbfd_la_DEPENDENCIES = $(OFILES) ofiles
-libbfd_la_LIBADD = `cat ofiles` @SHARED_LIBADD@ $(LIBDL) $(ZLIB)
+libbfd_la_DEPENDENCIES = $(OFILES) ofiles ../libsframe/libsframe.la
+libbfd_la_LIBADD = `cat ofiles` @SHARED_LIBADD@ $(LIBDL) $(ZLIB) $(ZSTD_LIBS) ../libsframe/libsframe.la
 libbfd_la_LDFLAGS += -release `cat libtool-soversion` @SHARED_LDFLAGS@
 
 # libtool will build .libs/libbfd.a.  We create libbfd.a in the build
@@ -805,7 +808,7 @@ libbfd.a: stamp-lib ; @true
 # vector names.  It is built from config.bfd.  It is not compiled by
 # itself, but is included by targets.c.
 targmatch.h: config.bfd targmatch.sed
-	$(AM_V_at)rm -f targmatch.h
+	$(AM_V_at)rm -f targmatch.new
 	$(AM_V_GEN)$(SED) -f $(srcdir)/targmatch.sed < $(srcdir)/config.bfd > targmatch.new
 	$(AM_V_at)mv -f targmatch.new targmatch.h
 
@@ -902,6 +905,10 @@ pe-aarch64igen.c: peXXigen.c
 	$(AM_V_at)echo "#line 1 \"peXXigen.c\"" > $@
 	$(AM_V_GEN)$(SED) -e s/XX/peAArch64/g < $< >> $@
 
+pe-loongarch64igen.c: peXXigen.c
+	$(AM_V_at)echo "#line 1 \"peXXigen.c\"" > $@
+	$(AM_V_GEN)$(SED) -e s/XX/peLoongArch64/g < $< >> $@
+
 host-aout.lo: Makefile
 
 # The following program can be used to generate a simple config file
@@ -925,8 +932,8 @@ BFD_H_FILES = bfd-in.h init.c opncls.c libbfd.c \
 	syms.c bfd.c archive.c corefile.c targets.c format.c \
 	linker.c simple.c compress.c
 BFD64_H_FILES = archive64.c
-LIBBFD_H_FILES = libbfd-in.h libbfd.c bfdio.c bfdwin.c \
-	cache.c reloc.c archures.c linker.c
+LIBBFD_H_FILES = libbfd-in.h libbfd.c bfd.c bfdio.c bfdwin.c \
+	cache.c reloc.c section.c targets.c archures.c linker.c
 LIBCOFF_H_FILES = libcoff-in.h coffcode.h
 
 headers: stmp-bin2-h stmp-lbfd-h stmp-lcoff-h

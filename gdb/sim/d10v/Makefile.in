@@ -1,5 +1,5 @@
 #    Makefile template for Configure for the D10v sim library.
-#    Copyright (C) 1996-2022 Free Software Foundation, Inc.
+#    Copyright (C) 1996-2023 Free Software Foundation, Inc.
 #    Written by Cygnus Support.
 #
 # This program is free software; you can redistribute it and/or modify
@@ -24,10 +24,5 @@ SIM_OBJS = \
 	table.o \
 	simops.o \
 	endian.o
-
-SIM_EXTRA_DEPS = simops.h
-
-INCLUDE = d10v_sim.h $(srcroot)/include/sim/callback.h endian.c \
-	$(srcroot)/include/gdb/sim-d10v.h
 
 ## COMMON_POST_CONFIG_FRAG

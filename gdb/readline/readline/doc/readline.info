@@ -1,4 +1,4 @@
-This is readline.info, produced by makeinfo version 6.7 from rlman.texi.
+This is readline.info, produced by makeinfo version 6.8 from rlman.texi.
 
 This manual describes the GNU Readline Library (version 8.1, 29 October
 2020), a library which aids in the consistency of user interface across
@@ -1807,7 +1807,14 @@ These variables are available to function writers.
 
  -- Variable: int rl_done
      Setting this to a non-zero value causes Readline to return the
-     current line immediately.
+     current line immediately.  Readline will set this variable when it
+     has read a key sequence bound to 'accept-line' and is about to
+     return the line to the caller.
+
+ -- Variable: int rl_eof_found
+     Readline will set this variable when it has read an EOF character
+     (e.g., the stty 'EOF' character) on an empty line or encountered a
+     read error and is about to return a NULL line to the caller.
 
  -- Variable: int rl_num_chars_to_read
      Setting this to a positive value before calling 'readline()' causes
@@ -2049,6 +2056,10 @@ These variables are available to function writers.
      'RL_STATE_DONE'
           Readline has read a key sequence bound to 'accept-line' and is
           about to return the line to the caller.
+     'RL_STATE_EOF'
+          Readline has read an EOF character (e.g., the stty 'EOF'
+          character) or encountered a read error and is about to return
+          a NULL line to the caller.
 
  -- Variable: int rl_explicit_arg
      Set to a non-zero value if an explicit numeric argument was
@@ -4813,7 +4824,7 @@ Function and Variable Index
                                                               (line  54)
 * rl_add_undo:                           Allowing Undoing.    (line  39)
 * rl_alphabetic:                         Utility Functions.   (line  38)
-* rl_already_prompted:                   Readline Variables.  (line  63)
+* rl_already_prompted:                   Readline Variables.  (line  70)
 * rl_attempted_completion_function:      Completion Variables.
                                                               (line  11)
 * rl_attempted_completion_over:          Completion Variables.
@@ -4823,7 +4834,7 @@ Function and Variable Index
 * rl_basic_word_break_characters:        Completion Variables.
                                                               (line 137)
 * rl_begin_undo_group:                   Allowing Undoing.    (line  28)
-* rl_binding_keymap:                     Readline Variables.  (line 184)
+* rl_binding_keymap:                     Readline Variables.  (line 191)
 * rl_bind_key:                           Binding Keys.        (line  21)
 * rl_bind_keyseq:                        Binding Keys.        (line  57)
 * rl_bind_keyseq_if_unbound:             Binding Keys.        (line  75)
@@ -4902,33 +4913,34 @@ Function and Variable Index
                                                               (line  62)
 * rl_delete_text:                        Modifying Text.      (line  10)
 * rl_deprep_terminal:                    Terminal Management. (line  12)
-* rl_deprep_term_function:               Readline Variables.  (line 174)
+* rl_deprep_term_function:               Readline Variables.  (line 181)
 * rl_ding:                               Utility Functions.   (line  35)
 * rl_directory_completion_hook:          Completion Variables.
                                                               (line  63)
 * rl_directory_rewrite_hook;:            Completion Variables.
                                                               (line  81)
 * rl_discard_keymap:                     Keymaps.             (line  25)
-* rl_dispatching:                        Readline Variables.  (line  40)
+* rl_dispatching:                        Readline Variables.  (line  47)
 * rl_display_match_list:                 Utility Functions.   (line  41)
-* rl_display_prompt:                     Readline Variables.  (line  58)
+* rl_display_prompt:                     Readline Variables.  (line  65)
 * rl_done:                               Readline Variables.  (line  27)
 * rl_do_undo:                            Allowing Undoing.    (line  47)
 * rl_echo_signal_char:                   Readline Signal Handling.
                                                               (line 143)
-* rl_editing_mode:                       Readline Variables.  (line 281)
+* rl_editing_mode:                       Readline Variables.  (line 292)
 * rl_empty_keymap:                       Keymaps.             (line  33)
 * rl_end:                                Readline Variables.  (line  18)
 * rl_end_undo_group:                     Allowing Undoing.    (line  34)
-* rl_erase_empty_line:                   Readline Variables.  (line  46)
-* rl_event_hook:                         Readline Variables.  (line 123)
+* rl_eof_found:                          Readline Variables.  (line  33)
+* rl_erase_empty_line:                   Readline Variables.  (line  53)
+* rl_event_hook:                         Readline Variables.  (line 130)
 * rl_execute_next:                       Character Input.     (line  25)
-* rl_executing_key:                      Readline Variables.  (line 191)
-* rl_executing_keymap:                   Readline Variables.  (line 180)
-* rl_executing_keyseq:                   Readline Variables.  (line 195)
-* rl_executing_macro:                    Readline Variables.  (line 188)
+* rl_executing_key:                      Readline Variables.  (line 198)
+* rl_executing_keymap:                   Readline Variables.  (line 187)
+* rl_executing_keyseq:                   Readline Variables.  (line 202)
+* rl_executing_macro:                    Readline Variables.  (line 195)
 * rl_expand_prompt:                      Redisplay.           (line  66)
-* rl_explicit_arg:                       Readline Variables.  (line 272)
+* rl_explicit_arg:                       Readline Variables.  (line 283)
 * rl_extend_line_buffer:                 Utility Functions.   (line  26)
 * rl_filename_completion_desired:        Completion Variables.
                                                               (line 235)
@@ -4962,7 +4974,7 @@ Function and Variable Index
                                                               (line  48)
 * rl_generic_bind:                       Binding Keys.        (line  87)
 * rl_getc:                               Character Input.     (line  14)
-* rl_getc_function:                      Readline Variables.  (line 128)
+* rl_getc_function:                      Readline Variables.  (line 135)
 * rl_get_keymap:                         Keymaps.             (line  40)
 * rl_get_keymap_by_name:                 Keymaps.             (line  46)
 * rl_get_keymap_name:                    Keymaps.             (line  51)
@@ -4970,7 +4982,7 @@ Function and Variable Index
                                                               (line 165)
 * rl_get_termcap:                        Miscellaneous Functions.
                                                               (line  41)
-* rl_gnu_readline_p:                     Readline Variables.  (line  82)
+* rl_gnu_readline_p:                     Readline Variables.  (line  89)
 * rl_ignore_completion_duplicates:       Completion Variables.
                                                               (line 231)
 * rl_ignore_some_completions_function:   Completion Variables.
@@ -4978,21 +4990,21 @@ Function and Variable Index
 * rl_inhibit_completion:                 Completion Variables.
                                                               (line 284)
 * rl_initialize:                         Utility Functions.   (line  30)
-* rl_input_available_hook:               Readline Variables.  (line 140)
+* rl_input_available_hook:               Readline Variables.  (line 147)
 * rl_insert_completions:                 Completion Functions.
                                                               (line  31)
 * rl_insert_text:                        Modifying Text.      (line   6)
-* rl_instream:                           Readline Variables.  (line  96)
+* rl_instream:                           Readline Variables.  (line 103)
 * rl_invoking_keyseqs:                   Associating Function Names and Bindings.
                                                               (line  29)
 * rl_invoking_keyseqs_in_map:            Associating Function Names and Bindings.
                                                               (line  33)
 * rl_keep_mark_active:                   Miscellaneous Functions.
                                                               (line  65)
-* rl_key_sequence_length:                Readline Variables.  (line 199)
+* rl_key_sequence_length:                Readline Variables.  (line 206)
 * rl_kill_text:                          Modifying Text.      (line  18)
-* rl_last_func:                          Readline Variables.  (line 109)
-* rl_library_version:                    Readline Variables.  (line  72)
+* rl_last_func:                          Readline Variables.  (line 116)
+* rl_library_version:                    Readline Variables.  (line  79)
 * rl_line_buffer:                        Readline Variables.  (line   8)
 * rl_list_funmap_names:                  Associating Function Names and Bindings.
                                                               (line  44)
@@ -5009,13 +5021,13 @@ Function and Variable Index
 * rl_modifying:                          Allowing Undoing.    (line  56)
 * rl_named_function:                     Associating Function Names and Bindings.
                                                               (line  10)
-* rl_numeric_arg:                        Readline Variables.  (line 276)
-* rl_num_chars_to_read:                  Readline Variables.  (line  31)
+* rl_numeric_arg:                        Readline Variables.  (line 287)
+* rl_num_chars_to_read:                  Readline Variables.  (line  38)
 * rl_on_new_line:                        Redisplay.           (line  14)
 * rl_on_new_line_with_prompt:            Redisplay.           (line  18)
-* rl_outstream:                          Readline Variables.  (line 100)
+* rl_outstream:                          Readline Variables.  (line 107)
 * rl_parse_and_bind:                     Binding Keys.        (line  95)
-* rl_pending_input:                      Readline Variables.  (line  36)
+* rl_pending_input:                      Readline Variables.  (line  43)
 * rl_pending_signal:                     Readline Signal Handling.
                                                               (line 102)
 * rl_persistent_signal_handlers:         Readline Signal Handling.
@@ -5023,19 +5035,19 @@ Function and Variable Index
 * rl_point:                              Readline Variables.  (line  14)
 * rl_possible_completions:               Completion Functions.
                                                               (line  27)
-* rl_prefer_env_winsize:                 Readline Variables.  (line 104)
+* rl_prefer_env_winsize:                 Readline Variables.  (line 111)
 * rl_prep_terminal:                      Terminal Management. (line   6)
-* rl_prep_term_function:                 Readline Variables.  (line 167)
-* rl_pre_input_hook:                     Readline Variables.  (line 118)
-* rl_prompt:                             Readline Variables.  (line  52)
+* rl_prep_term_function:                 Readline Variables.  (line 174)
+* rl_pre_input_hook:                     Readline Variables.  (line 125)
+* rl_prompt:                             Readline Variables.  (line  59)
 * rl_push_macro_input:                   Modifying Text.      (line  25)
-* rl_readline_name:                      Readline Variables.  (line  91)
-* rl_readline_state:                     Readline Variables.  (line 202)
-* rl_readline_version:                   Readline Variables.  (line  75)
+* rl_readline_name:                      Readline Variables.  (line  98)
+* rl_readline_state:                     Readline Variables.  (line 209)
+* rl_readline_version:                   Readline Variables.  (line  82)
 * rl_read_init_file:                     Binding Keys.        (line 100)
 * rl_read_key:                           Character Input.     (line   6)
 * rl_redisplay:                          Redisplay.           (line   6)
-* rl_redisplay_function:                 Readline Variables.  (line 161)
+* rl_redisplay_function:                 Readline Variables.  (line 168)
 * rl_replace_line:                       Utility Functions.   (line  21)
 * rl_reset_after_signal:                 Readline Signal Handling.
                                                               (line 121)
@@ -5061,14 +5073,14 @@ Function and Variable Index
 * rl_set_signals:                        Readline Signal Handling.
                                                               (line 176)
 * rl_show_char:                          Redisplay.           (line  36)
-* rl_signal_event_hook:                  Readline Variables.  (line 136)
+* rl_signal_event_hook:                  Readline Variables.  (line 143)
 * rl_sort_completion_matches:            Completion Variables.
                                                               (line 262)
 * rl_special_prefixes:                   Completion Variables.
                                                               (line 171)
-* rl_startup_hook:                       Readline Variables.  (line 114)
+* rl_startup_hook:                       Readline Variables.  (line 121)
 * rl_stuff_char:                         Character Input.     (line  18)
-* rl_terminal_name:                      Readline Variables.  (line  86)
+* rl_terminal_name:                      Readline Variables.  (line  93)
 * rl_tty_set_default_bindings:           Terminal Management. (line  17)
 * rl_tty_set_echoing:                    Terminal Management. (line  27)
 * rl_tty_unset_default_bindings:         Terminal Management. (line  22)
@@ -5164,30 +5176,30 @@ Node: Custom Functions69852
 Node: Readline Typedefs71335
 Node: Function Writing72969
 Node: Readline Variables74283
-Node: Readline Convenience Functions86955
-Node: Function Naming88027
-Node: Keymaps89289
-Node: Binding Keys92368
-Node: Associating Function Names and Bindings96916
-Node: Allowing Undoing99695
-Node: Redisplay102245
-Node: Modifying Text106269
-Node: Character Input107516
-Node: Terminal Management109414
-Node: Utility Functions111237
-Node: Miscellaneous Functions114565
-Node: Alternate Interface117984
-Node: A Readline Example120726
-Node: Alternate Interface Example122665
-Node: Readline Signal Handling126197
-Node: Custom Completers135456
-Node: How Completing Works136176
-Node: Completion Functions139483
-Node: Completion Variables143057
-Node: A Short Completion Example158850
-Node: GNU Free Documentation License171630
-Node: Concept Index196804
-Node: Function and Variable Index198325
+Node: Readline Convenience Functions87537
+Node: Function Naming88609
+Node: Keymaps89871
+Node: Binding Keys92950
+Node: Associating Function Names and Bindings97498
+Node: Allowing Undoing100277
+Node: Redisplay102827
+Node: Modifying Text106851
+Node: Character Input108098
+Node: Terminal Management109996
+Node: Utility Functions111819
+Node: Miscellaneous Functions115147
+Node: Alternate Interface118566
+Node: A Readline Example121308
+Node: Alternate Interface Example123247
+Node: Readline Signal Handling126779
+Node: Custom Completers136038
+Node: How Completing Works136758
+Node: Completion Functions140065
+Node: Completion Variables143639
+Node: A Short Completion Example159432
+Node: GNU Free Documentation License172212
+Node: Concept Index197386
+Node: Function and Variable Index198907
 
 End Tag Table
 

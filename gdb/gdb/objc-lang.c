@@ -1,6 +1,6 @@
 /* Objective-C language support routines for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    Contributed by Apple Computer, Inc.
    Written by Michael Snyder.
@@ -76,7 +76,7 @@ struct objc_method {
   CORE_ADDR imp;
 };
 
-static const struct objfile_key<unsigned int> objc_objfile_data;
+static const registry<objfile>::key<unsigned int> objc_objfile_data;
 
 /* Lookup a structure type named "struct NAME", visible in lexical
    block BLOCK.  If NOERR is nonzero, return zero if NAME is not
@@ -266,16 +266,23 @@ public:
 
   /* See language.h.  */
 
-  void print_type (struct type *type, const char *varstring,
-		   struct ui_file *stream, int show, int level,
-		   const struct type_print_options *flags) const override
+  bool can_print_type_offsets () const override
   {
-    c_print_type (type, varstring, stream, show, level, flags);
+    return true;
   }
 
   /* See language.h.  */
 
-  CORE_ADDR skip_trampoline (struct frame_info *frame,
+  void print_type (struct type *type, const char *varstring,
+		   struct ui_file *stream, int show, int level,
+		   const struct type_print_options *flags) const override
+  {
+    c_print_type (type, varstring, stream, show, level, la_language, flags);
+  }
+
+  /* See language.h.  */
+
+  CORE_ADDR skip_trampoline (frame_info_ptr frame,
 			     CORE_ADDR stop_pc) const override
   {
     struct gdbarch *gdbarch = get_frame_arch (frame);
@@ -621,8 +628,8 @@ info_selectors_command (const char *regexp, int from_tty)
     }
   if (matches)
     {
-      printf_filtered (_("Selectors matching \"%s\":\n\n"), 
-		       regexp ? regexp : "*");
+      gdb_printf (_("Selectors matching \"%s\":\n\n"), 
+		  regexp ? regexp : "*");
 
       sym_arr = XALLOCAVEC (struct symbol *, matches);
       matches = 0;
@@ -666,13 +673,13 @@ info_selectors_command (const char *regexp, int from_tty)
 	    *p++ = *name++;
 	  *p++ = '\0';
 	  /* Print in columns.  */
-	  puts_filtered_tabular(asel, maxlen + 1, 0);
+	  puts_tabular(asel, maxlen + 1, 0);
 	}
       begin_line();
     }
   else
-    printf_filtered (_("No selectors matching \"%s\"\n"),
-		     regexp ? regexp : "*");
+    gdb_printf (_("No selectors matching \"%s\"\n"),
+		regexp ? regexp : "*");
 }
 
 /*
@@ -763,8 +770,8 @@ info_classes_command (const char *regexp, int from_tty)
     }
   if (matches)
     {
-      printf_filtered (_("Classes matching \"%s\":\n\n"), 
-		       regexp ? regexp : "*");
+      gdb_printf (_("Classes matching \"%s\":\n\n"), 
+		  regexp ? regexp : "*");
       sym_arr = XALLOCAVEC (struct symbol *, matches);
       matches = 0;
       for (objfile *objfile : current_program_space->objfiles ())
@@ -800,12 +807,12 @@ info_classes_command (const char *regexp, int from_tty)
 	    *p++ = *name++;
 	  *p++ = '\0';
 	  /* Print in columns.  */
-	  puts_filtered_tabular(aclass, maxlen + 1, 0);
+	  puts_tabular(aclass, maxlen + 1, 0);
 	}
       begin_line();
     }
   else
-    printf_filtered (_("No classes matching \"%s\"\n"), regexp ? regexp : "*");
+    gdb_printf (_("No classes matching \"%s\"\n"), regexp ? regexp : "*");
 }
 
 static char * 
@@ -1181,12 +1188,12 @@ print_object_command (const char *args, int from_tty)
     do
       { /* Read and print characters up to EOS.  */
 	QUIT;
-	printf_filtered ("%c", c);
+	gdb_printf ("%c", c);
 	read_memory (string_addr + i++, &c, 1);
       } while (c != 0);
   else
-    printf_filtered(_("<object returns empty description>"));
-  printf_filtered ("\n");
+    gdb_printf(_("<object returns empty description>"));
+  gdb_printf ("\n");
 }
 
 /* The data structure 'methcalls' is used to detect method calls (thru
@@ -1249,7 +1256,7 @@ find_objc_msgsend (void)
 	  continue; 
 	}
 
-      methcalls[i].begin = BMSYMBOL_VALUE_ADDRESS (func);
+      methcalls[i].begin = func.value_address ();
       methcalls[i].end = minimal_symbol_upper_bound (func);
     }
 }
@@ -1458,7 +1465,7 @@ find_implementation (struct gdbarch *gdbarch,
 static int
 resolve_msgsend (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
-  struct frame_info *frame = get_current_frame ();
+  frame_info_ptr frame = get_current_frame ();
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
 
@@ -1480,7 +1487,7 @@ resolve_msgsend (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
-  struct frame_info *frame = get_current_frame ();
+  frame_info_ptr frame = get_current_frame ();
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
 
@@ -1502,7 +1509,7 @@ resolve_msgsend_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_super (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
-  struct frame_info *frame = get_current_frame ();
+  frame_info_ptr frame = get_current_frame ();
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
 
@@ -1530,7 +1537,7 @@ resolve_msgsend_super (CORE_ADDR pc, CORE_ADDR *new_pc)
 static int
 resolve_msgsend_super_stret (CORE_ADDR pc, CORE_ADDR *new_pc)
 {
-  struct frame_info *frame = get_current_frame ();
+  frame_info_ptr frame = get_current_frame ();
   struct gdbarch *gdbarch = get_frame_arch (frame);
   struct type *ptr_type = builtin_type (gdbarch)->builtin_func_ptr;
 

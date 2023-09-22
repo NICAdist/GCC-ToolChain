@@ -1,6 +1,6 @@
 // Compatibility symbols for previous versions, C++0x bits -*- C++ -*-
 
-// Copyright (C) 2013-2022 Free Software Foundation, Inc.
+// Copyright (C) 2013-2023 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -26,6 +26,10 @@
 
 #if __cplusplus < 201103L
 # error "compatibility-condvar-c++0x.cc must be compiled with -std=gnu++11"
+#endif
+
+#if _GLIBCXX_INLINE_VERSION
+# error "compatibility-thread-c++0x.cc is not needed for gnu-versioned-namespace"
 #endif
 
 #if defined(_GLIBCXX_HAS_GTHREADS) && defined(_GLIBCXX_USE_C99_STDINT_TR1)

@@ -1,5 +1,5 @@
 /* Callgraph clones
-   Copyright (C) 2003-2022 Free Software Foundation, Inc.
+   Copyright (C) 2003-2023 Free Software Foundation, Inc.
    Contributed by Jan Hubicka
 
 This file is part of GCC.
@@ -385,6 +385,7 @@ cgraph_node::create_clone (tree new_decl, profile_count prof_count,
   if (!new_inlined_to)
     prof_count = count.combine_with_ipa_count (prof_count);
   new_node->count = prof_count;
+  new_node->calls_declare_variant_alt = this->calls_declare_variant_alt;
 
   /* Update IPA profile.  Local profiles need no updating in original.  */
   if (update_original)
@@ -434,7 +435,9 @@ cgraph_node::create_clone (tree new_decl, profile_count prof_count,
 	 version.  The only exception is when the edge was proved to
 	 be unreachable during the cloning procedure.  */
       if (!e->callee
-	  || !fndecl_built_in_p (e->callee->decl, BUILT_IN_UNREACHABLE))
+	  || !(fndecl_built_in_p (e->callee->decl, BUILT_IN_UNREACHABLE)
+	       || fndecl_built_in_p (e->callee->decl,
+				     BUILT_IN_UNREACHABLE_TRAP)))
         e->redirect_callee_duplicating_thunks (new_node);
     }
   new_node->expand_all_artificial_thunks ();

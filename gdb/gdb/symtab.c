@@ -1,6 +1,6 @@
 /* Symbol table lookup for the GNU debugger, GDB.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -121,7 +121,7 @@ struct main_info
 
 /* Program space key for finding name and language of "main".  */
 
-static const program_space_key<main_info> main_progspace_key;
+static const registry<program_space>::key<main_info> main_progspace_key;
 
 /* The default symbol cache size.
    There is no extra cpu cost for large N (except when flushing the cache,
@@ -251,7 +251,7 @@ struct symbol_cache
 
 /* Program space key for finding its symbol cache.  */
 
-static const program_space_key<symbol_cache> symbol_cache_key;
+static const registry<program_space>::key<symbol_cache> symbol_cache_key;
 
 /* When non-zero, print debugging messages related to symtab creation.  */
 unsigned int symtab_create_debug = 0;
@@ -287,6 +287,10 @@ static const char *const multiple_symbols_modes[] =
   NULL
 };
 static const char *multiple_symbols_mode = multiple_symbols_all;
+
+/* When TRUE, ignore the prologue-end flag in linetable_entry when searching
+   for the SAL past a function prologue.  */
+static bool ignore_prologue_end_flag = false;
 
 /* Read-only accessor to AUTO_SELECT_MODE.  */
 
@@ -327,14 +331,6 @@ search_domain_name (enum search_domain e)
     case ALL_DOMAIN: return "ALL_DOMAIN";
     default: gdb_assert_not_reached ("bad search_domain");
     }
-}
-
-/* See symtab.h.  */
-
-program_space *
-symtab::pspace () const
-{
-  return this->objfile ()->pspace;
 }
 
 /* See symtab.h.  */
@@ -409,13 +405,26 @@ compunit_symtab::primary_filetab () const
 /* See symtab.h.  */
 
 enum language
-compunit_language (const struct compunit_symtab *cust)
+compunit_symtab::language () const
 {
-  struct symtab *symtab = cust->primary_filetab ();
+  struct symtab *symtab = primary_filetab ();
 
-/* The language of the compunit symtab is the language of its primary
-   source file.  */
+  /* The language of the compunit symtab is the language of its
+     primary source file.  */
   return symtab->language ();
+}
+
+/* The relocated address of the minimal symbol, using the section
+   offsets from OBJFILE.  */
+
+CORE_ADDR
+minimal_symbol::value_address (objfile *objfile) const
+{
+  if (this->maybe_copied)
+    return get_msymbol_address (objfile, this);
+  else
+    return (this->value_raw_address ()
+	    + objfile->section_offsets[this->section_index ()]);
 }
 
 /* See symtab.h.  */
@@ -423,11 +432,11 @@ compunit_language (const struct compunit_symtab *cust)
 bool
 minimal_symbol::data_p () const
 {
-  return type == mst_data
-    || type == mst_bss
-    || type == mst_abs
-    || type == mst_file_data
-    || type == mst_file_bss;
+  return m_type == mst_data
+    || m_type == mst_bss
+    || m_type == mst_abs
+    || m_type == mst_file_data
+    || m_type == mst_file_bss;
 }
 
 /* See symtab.h.  */
@@ -435,12 +444,12 @@ minimal_symbol::data_p () const
 bool
 minimal_symbol::text_p () const
 {
-  return type == mst_text
-    || type == mst_text_gnu_ifunc
-    || type == mst_data_gnu_ifunc
-    || type == mst_slot_got_plt
-    || type == mst_solib_trampoline
-    || type == mst_file_text;
+  return m_type == mst_text
+    || m_type == mst_text_gnu_ifunc
+    || m_type == mst_data_gnu_ifunc
+    || m_type == mst_slot_got_plt
+    || m_type == mst_solib_trampoline
+    || m_type == mst_file_text;
 }
 
 /* See whether FILENAME matches SEARCH_NAME using the rule that we
@@ -1415,13 +1424,11 @@ symbol_cache_lookup (struct symbol_cache *cache,
 
   if (eq_symbol_entry (slot, objfile_context, name, domain))
     {
-      if (symbol_lookup_debug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "%s block symbol cache hit%s for %s, %s\n",
-			    block == GLOBAL_BLOCK ? "Global" : "Static",
-			    slot->state == SYMBOL_SLOT_NOT_FOUND
-			    ? " (not found)" : "",
-			    name, domain_name (domain));
+      symbol_lookup_debug_printf ("%s block symbol cache hit%s for %s, %s",
+				  block == GLOBAL_BLOCK ? "Global" : "Static",
+				  slot->state == SYMBOL_SLOT_NOT_FOUND
+				  ? " (not found)" : "", name,
+				  domain_name (domain));
       ++bsc->hits;
       if (slot->state == SYMBOL_SLOT_NOT_FOUND)
 	return SYMBOL_LOOKUP_FAILED;
@@ -1430,13 +1437,9 @@ symbol_cache_lookup (struct symbol_cache *cache,
 
   /* Symbol is not present in the cache.  */
 
-  if (symbol_lookup_debug)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "%s block symbol cache miss for %s, %s\n",
-			  block == GLOBAL_BLOCK ? "Global" : "Static",
-			  name, domain_name (domain));
-    }
+  symbol_lookup_debug_printf ("%s block symbol cache miss for %s, %s",
+			      block == GLOBAL_BLOCK ? "Global" : "Static",
+			      name, domain_name (domain));
   ++bsc->misses;
   return {};
 }
@@ -1543,7 +1546,7 @@ symbol_cache_dump (const struct symbol_cache *cache)
 
   if (cache->global_symbols == NULL)
     {
-      printf_filtered ("  <disabled>\n");
+      gdb_printf ("  <disabled>\n");
       return;
     }
 
@@ -1554,9 +1557,9 @@ symbol_cache_dump (const struct symbol_cache *cache)
       unsigned int i;
 
       if (pass == 0)
-	printf_filtered ("Global symbols:\n");
+	gdb_printf ("Global symbols:\n");
       else
-	printf_filtered ("Static symbols:\n");
+	gdb_printf ("Static symbols:\n");
 
       for (i = 0; i < bsc->size; ++i)
 	{
@@ -1569,20 +1572,20 @@ symbol_cache_dump (const struct symbol_cache *cache)
 	    case SYMBOL_SLOT_UNUSED:
 	      break;
 	    case SYMBOL_SLOT_NOT_FOUND:
-	      printf_filtered ("  [%4u] = %s, %s %s (not found)\n", i,
-			       host_address_to_string (slot->objfile_context),
-			       slot->value.not_found.name,
-			       domain_name (slot->value.not_found.domain));
+	      gdb_printf ("  [%4u] = %s, %s %s (not found)\n", i,
+			  host_address_to_string (slot->objfile_context),
+			  slot->value.not_found.name,
+			  domain_name (slot->value.not_found.domain));
 	      break;
 	    case SYMBOL_SLOT_FOUND:
 	      {
 		struct symbol *found = slot->value.found.symbol;
 		const struct objfile *context = slot->objfile_context;
 
-		printf_filtered ("  [%4u] = %s, %s %s\n", i,
-				 host_address_to_string (context),
-				 found->print_name (),
-				 domain_name (found->domain ()));
+		gdb_printf ("  [%4u] = %s, %s %s\n", i,
+			    host_address_to_string (context),
+			    found->print_name (),
+			    domain_name (found->domain ()));
 		break;
 	      }
 	    }
@@ -1599,16 +1602,16 @@ maintenance_print_symbol_cache (const char *args, int from_tty)
     {
       struct symbol_cache *cache;
 
-      printf_filtered (_("Symbol cache for pspace %d\n%s:\n"),
-		       pspace->num,
-		       pspace->symfile_object_file != NULL
-		       ? objfile_name (pspace->symfile_object_file)
-		       : "(no object file)");
+      gdb_printf (_("Symbol cache for pspace %d\n%s:\n"),
+		  pspace->num,
+		  pspace->symfile_object_file != NULL
+		  ? objfile_name (pspace->symfile_object_file)
+		  : "(no object file)");
 
       /* If the cache hasn't been created yet, avoid creating one.  */
       cache = symbol_cache_key.get (pspace);
       if (cache == NULL)
-	printf_filtered ("  <empty>\n");
+	gdb_printf ("  <empty>\n");
       else
 	symbol_cache_dump (cache);
     }
@@ -1634,7 +1637,7 @@ symbol_cache_stats (struct symbol_cache *cache)
 
   if (cache->global_symbols == NULL)
     {
-      printf_filtered ("  <disabled>\n");
+      gdb_printf ("  <disabled>\n");
       return;
     }
 
@@ -1646,14 +1649,14 @@ symbol_cache_stats (struct symbol_cache *cache)
       QUIT;
 
       if (pass == 0)
-	printf_filtered ("Global block cache stats:\n");
+	gdb_printf ("Global block cache stats:\n");
       else
-	printf_filtered ("Static block cache stats:\n");
+	gdb_printf ("Static block cache stats:\n");
 
-      printf_filtered ("  size:       %u\n", bsc->size);
-      printf_filtered ("  hits:       %u\n", bsc->hits);
-      printf_filtered ("  misses:     %u\n", bsc->misses);
-      printf_filtered ("  collisions: %u\n", bsc->collisions);
+      gdb_printf ("  size:       %u\n", bsc->size);
+      gdb_printf ("  hits:       %u\n", bsc->hits);
+      gdb_printf ("  misses:     %u\n", bsc->misses);
+      gdb_printf ("  collisions: %u\n", bsc->collisions);
     }
 }
 
@@ -1666,16 +1669,16 @@ maintenance_print_symbol_cache_statistics (const char *args, int from_tty)
     {
       struct symbol_cache *cache;
 
-      printf_filtered (_("Symbol cache statistics for pspace %d\n%s:\n"),
-		       pspace->num,
-		       pspace->symfile_object_file != NULL
-		       ? objfile_name (pspace->symfile_object_file)
-		       : "(no object file)");
+      gdb_printf (_("Symbol cache statistics for pspace %d\n%s:\n"),
+		  pspace->num,
+		  pspace->symfile_object_file != NULL
+		  ? objfile_name (pspace->symfile_object_file)
+		  : "(no object file)");
 
       /* If the cache hasn't been created yet, avoid creating one.  */
       cache = symbol_cache_key.get (pspace);
       if (cache == NULL)
-	printf_filtered ("  empty, no stats available\n");
+	gdb_printf ("  empty, no stats available\n");
       else
 	symbol_cache_stats (cache);
     }
@@ -1794,10 +1797,10 @@ fixup_symbol_section (struct symbol *sym, struct objfile *objfile)
 
   /* We either have an OBJFILE, or we can get at it from the sym's
      symtab.  Anything else is a bug.  */
-  gdb_assert (objfile || symbol_symtab (sym));
+  gdb_assert (objfile || sym->symtab ());
 
   if (objfile == NULL)
-    objfile = symbol_objfile (sym);
+    objfile = sym->objfile ();
 
   if (sym->obj_section (objfile) != nullptr)
     return sym;
@@ -1809,10 +1812,10 @@ fixup_symbol_section (struct symbol *sym, struct objfile *objfile)
     {
     case LOC_STATIC:
     case LOC_LABEL:
-      addr = SYMBOL_VALUE_ADDRESS (sym);
+      addr = sym->value_address ();
       break;
     case LOC_BLOCK:
-      addr = BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym));
+      addr = sym->value_block ()->entry_pc ();
       break;
 
     default:
@@ -1947,6 +1950,8 @@ lookup_symbol_in_language (const char *name, const struct block *block,
 			   const domain_enum domain, enum language lang,
 			   struct field_of_this_result *is_a_field_of_this)
 {
+  SYMBOL_LOOKUP_SCOPED_DEBUG_ENTER_EXIT;
+
   demangle_result_storage storage;
   const char *modified_name = demangle_for_lookup (name, lang, storage);
 
@@ -1987,15 +1992,9 @@ lookup_language_this (const struct language_defn *lang,
   if (lang->name_of_this () == NULL || block == NULL)
     return {};
 
-  if (symbol_lookup_debug > 1)
-    {
-      struct objfile *objfile = block_objfile (block);
-
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_language_this (%s, %s (objfile %s))",
-			  lang->name (), host_address_to_string (block),
-			  objfile_debug_name (objfile));
-    }
+  symbol_lookup_debug_printf_v ("lookup_language_this (%s, %s (objfile %s))",
+				lang->name (), host_address_to_string (block),
+				objfile_debug_name (block_objfile (block)));
 
   while (block)
     {
@@ -2006,22 +2005,18 @@ lookup_language_this (const struct language_defn *lang,
 				 VAR_DOMAIN);
       if (sym != NULL)
 	{
-	  if (symbol_lookup_debug > 1)
-	    {
-	      fprintf_unfiltered (gdb_stdlog, " = %s (%s, block %s)\n",
-				  sym->print_name (),
-				  host_address_to_string (sym),
-				  host_address_to_string (block));
-	    }
+	  symbol_lookup_debug_printf_v
+	    ("lookup_language_this (...) = %s (%s, block %s)",
+	     sym->print_name (), host_address_to_string (sym),
+	     host_address_to_string (block));
 	  return (struct block_symbol) {sym, block};
 	}
-      if (BLOCK_FUNCTION (block))
+      if (block->function ())
 	break;
-      block = BLOCK_SUPERBLOCK (block);
+      block = block->superblock ();
     }
 
-  if (symbol_lookup_debug > 1)
-    fprintf_unfiltered (gdb_stdlog, " = NULL\n");
+  symbol_lookup_debug_printf_v ("lookup_language_this (...) = NULL");
   return {};
 }
 
@@ -2079,6 +2074,8 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
 		   const domain_enum domain, enum language language,
 		   struct field_of_this_result *is_a_field_of_this)
 {
+  SYMBOL_LOOKUP_SCOPED_DEBUG_ENTER_EXIT;
+
   struct block_symbol result;
   const struct language_defn *langdef;
 
@@ -2087,12 +2084,13 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
       struct objfile *objfile = (block == nullptr
 				 ? nullptr : block_objfile (block));
 
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_aux (%s, %s (objfile %s), %s, %s)\n",
-			  name, host_address_to_string (block),
-			  objfile != NULL
-			  ? objfile_debug_name (objfile) : "NULL",
-			  domain_name (domain), language_str (language));
+      symbol_lookup_debug_printf
+	("demangled symbol name = \"%s\", block @ %s (objfile %s)",
+	 name, host_address_to_string (block),
+	 objfile != NULL ? objfile_debug_name (objfile) : "NULL");
+      symbol_lookup_debug_printf
+	("domain name = \"%s\", language = \"%s\")",
+	 domain_name (domain), language_str (language));
     }
 
   /* Make sure we do something sensible with is_a_field_of_this, since
@@ -2108,11 +2106,9 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
   result = lookup_local_symbol (name, match_type, block, domain, language);
   if (result.symbol != NULL)
     {
-      if (symbol_lookup_debug)
-	{
-	  fprintf_unfiltered (gdb_stdlog, "lookup_symbol_aux (...) = %s\n",
-			      host_address_to_string (result.symbol));
-	}
+      symbol_lookup_debug_printf
+	("found symbol @ %s (using lookup_local_symbol)",
+	 host_address_to_string (result.symbol));
       return result;
     }
 
@@ -2136,7 +2132,7 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
 	     be typedefed; just be safe.  */
 	  t = check_typedef (t);
 	  if (t->is_pointer_or_reference ())
-	    t = TYPE_TARGET_TYPE (t);
+	    t = t->target_type ();
 
 	  if (t->code () != TYPE_CODE_STRUCT
 	      && t->code () != TYPE_CODE_UNION)
@@ -2145,11 +2141,7 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
 
 	  if (check_field (t, name, is_a_field_of_this))
 	    {
-	      if (symbol_lookup_debug)
-		{
-		  fprintf_unfiltered (gdb_stdlog,
-				      "lookup_symbol_aux (...) = NULL\n");
-		}
+	      symbol_lookup_debug_printf ("no symbol found");
 	      return {};
 	    }
 	}
@@ -2161,11 +2153,9 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
   result = langdef->lookup_symbol_nonlocal (name, block, domain);
   if (result.symbol != NULL)
     {
-      if (symbol_lookup_debug)
-	{
-	  fprintf_unfiltered (gdb_stdlog, "lookup_symbol_aux (...) = %s\n",
-			      host_address_to_string (result.symbol));
-	}
+      symbol_lookup_debug_printf
+	("found symbol @ %s (using language lookup_symbol_nonlocal)",
+	 host_address_to_string (result.symbol));
       return result;
     }
 
@@ -2173,13 +2163,9 @@ lookup_symbol_aux (const char *name, symbol_name_match_type match_type,
      but more useful than an error.  */
 
   result = lookup_static_symbol (name, domain);
-  if (symbol_lookup_debug)
-    {
-      fprintf_unfiltered (gdb_stdlog, "lookup_symbol_aux (...) = %s\n",
-			  result.symbol != NULL
-			    ? host_address_to_string (result.symbol)
-			    : "NULL");
-    }
+  symbol_lookup_debug_printf
+    ("found symbol @ %s (using lookup_static_symbol)",
+     result.symbol != NULL ? host_address_to_string (result.symbol) : "NULL");
   return result;
 }
 
@@ -2218,9 +2204,9 @@ lookup_local_symbol (const char *name,
 	    return blocksym;
 	}
 
-      if (BLOCK_FUNCTION (block) != NULL && block_inlined_p (block))
+      if (block->function () != NULL && block_inlined_p (block))
 	break;
-      block = BLOCK_SUPERBLOCK (block);
+      block = block->superblock ();
     }
 
   /* We've reached the end of the function without finding a result.  */
@@ -2237,31 +2223,27 @@ lookup_symbol_in_block (const char *name, symbol_name_match_type match_type,
 {
   struct symbol *sym;
 
-  if (symbol_lookup_debug > 1)
+  if (symbol_lookup_debug)
     {
-      struct objfile *objfile = (block == nullptr
-				 ? nullptr : block_objfile (block));
+      struct objfile *objfile
+	= block == nullptr ? nullptr : block_objfile (block);
 
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_block (%s, %s (objfile %s), %s)",
-			  name, host_address_to_string (block),
-			  objfile_debug_name (objfile),
-			  domain_name (domain));
+      symbol_lookup_debug_printf_v
+	("lookup_symbol_in_block (%s, %s (objfile %s), %s)",
+	 name, host_address_to_string (block),
+	 objfile != nullptr ? objfile_debug_name (objfile) : "NULL",
+	 domain_name (domain));
     }
 
   sym = block_lookup_symbol (block, name, match_type, domain);
   if (sym)
     {
-      if (symbol_lookup_debug > 1)
-	{
-	  fprintf_unfiltered (gdb_stdlog, " = %s\n",
-			      host_address_to_string (sym));
-	}
+      symbol_lookup_debug_printf_v ("lookup_symbol_in_block (...) = %s",
+				    host_address_to_string (sym));
       return fixup_symbol_section (sym, NULL);
     }
 
-  if (symbol_lookup_debug > 1)
-    fprintf_unfiltered (gdb_stdlog, " = NULL\n");
+  symbol_lookup_debug_printf_v ("lookup_symbol_in_block (...) = NULL");
   return NULL;
 }
 
@@ -2299,15 +2281,11 @@ lookup_symbol_in_objfile_symtabs (struct objfile *objfile,
 {
   gdb_assert (block_index == GLOBAL_BLOCK || block_index == STATIC_BLOCK);
 
-  if (symbol_lookup_debug > 1)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_objfile_symtabs (%s, %s, %s, %s)",
-			  objfile_debug_name (objfile),
-			  block_index == GLOBAL_BLOCK
-			  ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
-			  name, domain_name (domain));
-    }
+  symbol_lookup_debug_printf_v
+    ("lookup_symbol_in_objfile_symtabs (%s, %s, %s, %s)",
+     objfile_debug_name (objfile),
+     block_index == GLOBAL_BLOCK ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
+     name, domain_name (domain));
 
   struct block_symbol other;
   other.symbol = NULL;
@@ -2318,7 +2296,7 @@ lookup_symbol_in_objfile_symtabs (struct objfile *objfile,
       struct block_symbol result;
 
       bv = cust->blockvector ();
-      block = BLOCKVECTOR_BLOCK (bv, block_index);
+      block = bv->block (block_index);
       result.symbol = block_lookup_symbol_primary (block, name, domain);
       result.block = block;
       if (result.symbol == NULL)
@@ -2343,18 +2321,16 @@ lookup_symbol_in_objfile_symtabs (struct objfile *objfile,
 
   if (other.symbol != NULL)
     {
-      if (symbol_lookup_debug > 1)
-	{
-	  fprintf_unfiltered (gdb_stdlog, " = %s (block %s)\n",
-			      host_address_to_string (other.symbol),
-			      host_address_to_string (other.block));
-	}
+      symbol_lookup_debug_printf_v
+	("lookup_symbol_in_objfile_symtabs (...) = %s (block %s)",
+	 host_address_to_string (other.symbol),
+	 host_address_to_string (other.block));
       other.symbol = fixup_symbol_section (other.symbol, objfile);
       return other;
     }
 
-  if (symbol_lookup_debug > 1)
-    fprintf_unfiltered (gdb_stdlog, " = NULL\n");
+  symbol_lookup_debug_printf_v
+    ("lookup_symbol_in_objfile_symtabs (...) = NULL");
   return {};
 }
 
@@ -2429,41 +2405,31 @@ lookup_symbol_via_quick_fns (struct objfile *objfile,
   const struct block *block;
   struct block_symbol result;
 
-  if (symbol_lookup_debug > 1)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_via_quick_fns (%s, %s, %s, %s)\n",
-			  objfile_debug_name (objfile),
-			  block_index == GLOBAL_BLOCK
-			  ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
-			  name, domain_name (domain));
-    }
+  symbol_lookup_debug_printf_v
+    ("lookup_symbol_via_quick_fns (%s, %s, %s, %s)",
+     objfile_debug_name (objfile),
+     block_index == GLOBAL_BLOCK ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
+     name, domain_name (domain));
 
   cust = objfile->lookup_symbol (block_index, name, domain);
   if (cust == NULL)
     {
-      if (symbol_lookup_debug > 1)
-	{
-	  fprintf_unfiltered (gdb_stdlog,
-			      "lookup_symbol_via_quick_fns (...) = NULL\n");
-	}
+      symbol_lookup_debug_printf_v
+	("lookup_symbol_via_quick_fns (...) = NULL");
       return {};
     }
 
   bv = cust->blockvector ();
-  block = BLOCKVECTOR_BLOCK (bv, block_index);
+  block = bv->block (block_index);
   result.symbol = block_lookup_symbol (block, name,
 				       symbol_name_match_type::FULL, domain);
   if (result.symbol == NULL)
     error_in_psymtab_expansion (block_index, name, cust);
 
-  if (symbol_lookup_debug > 1)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_via_quick_fns (...) = %s (block %s)\n",
-			  host_address_to_string (result.symbol),
-			  host_address_to_string (block));
-    }
+  symbol_lookup_debug_printf_v
+    ("lookup_symbol_via_quick_fns (...) = %s (block %s)",
+     host_address_to_string (result.symbol),
+     host_address_to_string (block));
 
   result.symbol = fixup_symbol_section (result.symbol, objfile);
   result.block = block;
@@ -2529,24 +2495,19 @@ lookup_symbol_in_static_block (const char *name,
       struct objfile *objfile = (block == nullptr
 				 ? nullptr : block_objfile (block));
 
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_static_block (%s, %s (objfile %s),"
-			  " %s)\n",
-			  name,
-			  host_address_to_string (block),
-			  objfile_debug_name (objfile),
-			  domain_name (domain));
+      symbol_lookup_debug_printf
+	("lookup_symbol_in_static_block (%s, %s (objfile %s), %s)",
+	 name, host_address_to_string (block),
+	 objfile != nullptr ? objfile_debug_name (objfile) : "NULL",
+	 domain_name (domain));
     }
 
   sym = lookup_symbol_in_block (name,
 				symbol_name_match_type::FULL,
 				static_block, domain);
-  if (symbol_lookup_debug)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_static_block (...) = %s\n",
-			  sym != NULL ? host_address_to_string (sym) : "NULL");
-    }
+  symbol_lookup_debug_printf ("lookup_symbol_in_static_block (...) = %s",
+			      sym != NULL
+			      ? host_address_to_string (sym) : "NULL");
   return (struct block_symbol) {sym, static_block};
 }
 
@@ -2563,100 +2524,31 @@ lookup_symbol_in_objfile (struct objfile *objfile, enum block_enum block_index,
 
   gdb_assert (block_index == GLOBAL_BLOCK || block_index == STATIC_BLOCK);
 
-  if (symbol_lookup_debug)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_objfile (%s, %s, %s, %s)\n",
-			  objfile_debug_name (objfile),
-			  block_index == GLOBAL_BLOCK
-			  ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
-			  name, domain_name (domain));
-    }
+  symbol_lookup_debug_printf ("lookup_symbol_in_objfile (%s, %s, %s, %s)",
+			      objfile_debug_name (objfile),
+			      block_index == GLOBAL_BLOCK
+			      ? "GLOBAL_BLOCK" : "STATIC_BLOCK",
+			      name, domain_name (domain));
 
   result = lookup_symbol_in_objfile_symtabs (objfile, block_index,
 					     name, domain);
   if (result.symbol != NULL)
     {
-      if (symbol_lookup_debug)
-	{
-	  fprintf_unfiltered (gdb_stdlog,
-			      "lookup_symbol_in_objfile (...) = %s"
-			      " (in symtabs)\n",
-			      host_address_to_string (result.symbol));
-	}
+      symbol_lookup_debug_printf
+	("lookup_symbol_in_objfile (...) = %s (in symtabs)",
+	 host_address_to_string (result.symbol));
       return result;
     }
 
   result = lookup_symbol_via_quick_fns (objfile, block_index,
 					name, domain);
-  if (symbol_lookup_debug)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "lookup_symbol_in_objfile (...) = %s%s\n",
-			  result.symbol != NULL
-			  ? host_address_to_string (result.symbol)
-			  : "NULL",
-			  result.symbol != NULL ? " (via quick fns)" : "");
-    }
+  symbol_lookup_debug_printf ("lookup_symbol_in_objfile (...) = %s%s",
+			      result.symbol != NULL
+			      ? host_address_to_string (result.symbol)
+			      : "NULL",
+			      result.symbol != NULL ? " (via quick fns)"
+			      : "");
   return result;
-}
-
-/* Find the language for partial symbol with NAME.  */
-
-static enum language
-find_quick_global_symbol_language (const char *name, const domain_enum domain)
-{
-  for (objfile *objfile : current_program_space->objfiles ())
-    {
-      bool symbol_found_p;
-      enum language lang
-	= objfile->lookup_global_symbol_language (name, domain, &symbol_found_p);
-      if (symbol_found_p)
-	return lang;
-    }
-
-  return language_unknown;
-}
-
-/* Private data to be used with lookup_symbol_global_iterator_cb.  */
-
-struct global_or_static_sym_lookup_data
-{
-  /* The name of the symbol we are searching for.  */
-  const char *name;
-
-  /* The domain to use for our search.  */
-  domain_enum domain;
-
-  /* The block index in which to search.  */
-  enum block_enum block_index;
-
-  /* The field where the callback should store the symbol if found.
-     It should be initialized to {NULL, NULL} before the search is started.  */
-  struct block_symbol result;
-};
-
-/* A callback function for gdbarch_iterate_over_objfiles_in_search_order.
-   It searches by name for a symbol in the block given by BLOCK_INDEX of the
-   given OBJFILE.  The arguments for the search are passed via CB_DATA, which
-   in reality is a pointer to struct global_or_static_sym_lookup_data.  */
-
-static int
-lookup_symbol_global_or_static_iterator_cb (struct objfile *objfile,
-					    void *cb_data)
-{
-  struct global_or_static_sym_lookup_data *data =
-    (struct global_or_static_sym_lookup_data *) cb_data;
-
-  gdb_assert (data->result.symbol == NULL
-	      && data->result.block == NULL);
-
-  data->result = lookup_symbol_in_objfile (objfile, data->block_index,
-					   data->name, data->domain);
-
-  /* If we found a match, tell the iterator to stop.  Otherwise,
-     keep going.  */
-  return (data->result.symbol != NULL);
 }
 
 /* This function contains the common code of lookup_{global,static}_symbol.
@@ -2671,7 +2563,6 @@ lookup_global_or_static_symbol (const char *name,
 {
   struct symbol_cache *cache = get_symbol_cache (current_program_space);
   struct block_symbol result;
-  struct global_or_static_sym_lookup_data lookup_data;
   struct block_symbol_cache *bsc;
   struct symbol_cache_slot *slot;
 
@@ -2691,16 +2582,15 @@ lookup_global_or_static_symbol (const char *name,
 
   /* Do a global search (of global blocks, heh).  */
   if (result.symbol == NULL)
-    {
-      memset (&lookup_data, 0, sizeof (lookup_data));
-      lookup_data.name = name;
-      lookup_data.block_index = block_index;
-      lookup_data.domain = domain;
-      gdbarch_iterate_over_objfiles_in_search_order
-	(objfile != NULL ? objfile->arch () : target_gdbarch (),
-	 lookup_symbol_global_or_static_iterator_cb, &lookup_data, objfile);
-      result = lookup_data.result;
-    }
+    gdbarch_iterate_over_objfiles_in_search_order
+      (objfile != NULL ? objfile->arch () : target_gdbarch (),
+       [&result, block_index, name, domain] (struct objfile *objfile_iter)
+	 {
+	   result = lookup_symbol_in_objfile (objfile_iter, block_index,
+					      name, domain);
+	   return result.symbol != nullptr;
+	 },
+       objfile);
 
   if (result.symbol != NULL)
     symbol_cache_mark_found (bsc, slot, objfile, result.symbol, result.block);
@@ -2801,7 +2691,7 @@ basic_lookup_transparent_type_quick (struct objfile *objfile,
     return NULL;
 
   bv = cust->blockvector ();
-  block = BLOCKVECTOR_BLOCK (bv, block_index);
+  block = bv->block (block_index);
   sym = block_find_symbol (block, name, STRUCT_DOMAIN,
 			   block_find_non_opaque_type, NULL);
   if (sym == NULL)
@@ -2826,7 +2716,7 @@ basic_lookup_transparent_type_1 (struct objfile *objfile,
   for (compunit_symtab *cust : objfile->compunits ())
     {
       bv = cust->blockvector ();
-      block = BLOCKVECTOR_BLOCK (bv, block_index);
+      block = bv->block (block_index);
       sym = block_find_symbol (block, name, STRUCT_DOMAIN,
 			       block_find_non_opaque_type, NULL);
       if (sym != NULL)
@@ -2971,17 +2861,16 @@ find_pc_sect_compunit_symtab (CORE_ADDR pc, struct obj_section *section)
       for (compunit_symtab *cust : obj_file->compunits ())
 	{
 	  const struct blockvector *bv = cust->blockvector ();
-	  const struct block *global_block
-	    = BLOCKVECTOR_BLOCK (bv, GLOBAL_BLOCK);
-	  CORE_ADDR start = BLOCK_START (global_block);
-	  CORE_ADDR end = BLOCK_END (global_block);
+	  const struct block *global_block = bv->global_block ();
+	  CORE_ADDR start = global_block->start ();
+	  CORE_ADDR end = global_block->end ();
 	  bool in_range_p = start <= pc && pc < end;
 	  if (!in_range_p)
 	    continue;
 
-	  if (BLOCKVECTOR_MAP (bv))
+	  if (bv->map () != nullptr)
 	    {
-	      if (addrmap_find (BLOCKVECTOR_MAP (bv), pc) == nullptr)
+	      if (bv->map ()->find (pc) == nullptr)
 		continue;
 
 	      return cust;
@@ -3021,7 +2910,7 @@ find_pc_sect_compunit_symtab (CORE_ADDR pc, struct obj_section *section)
 		   b_index <= STATIC_BLOCK && sym == NULL;
 		   ++b_index)
 		{
-		  const struct block *b = BLOCKVECTOR_BLOCK (bv, b_index);
+		  const struct block *b = bv->block (b_index);
 		  ALL_BLOCK_SYMBOLS (b, iter, sym)
 		    {
 		      fixup_symbol_section (sym, obj_file);
@@ -3080,14 +2969,14 @@ find_symbol_at_address (CORE_ADDR address)
 
       for (int i = GLOBAL_BLOCK; i <= STATIC_BLOCK; ++i)
 	{
-	  const struct block *b = BLOCKVECTOR_BLOCK (bv, i);
+	  const struct block *b = bv->block (i);
 	  struct block_iterator iter;
 	  struct symbol *sym;
 
 	  ALL_BLOCK_SYMBOLS (b, iter, sym)
 	    {
 	      if (sym->aclass () == LOC_STATIC
-		  && SYMBOL_VALUE_ADDRESS (sym) == addr)
+		  && sym->value_address () == addr)
 		return sym;
 	    }
 	}
@@ -3229,7 +3118,7 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
    */
   msymbol = lookup_minimal_symbol_by_pc (pc);
   if (msymbol.minsym != NULL)
-    if (MSYMBOL_TYPE (msymbol.minsym) == mst_solib_trampoline)
+    if (msymbol.minsym->type () == mst_solib_trampoline)
       {
 	struct bound_minimal_symbol mfunsym
 	  = lookup_minimal_symbol_text (msymbol.minsym->linkage_name (),
@@ -3249,8 +3138,8 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
 	     msymbol->linkage_name ()); */
 	  ;
 	/* fall through */
-	else if (BMSYMBOL_VALUE_ADDRESS (mfunsym)
-		 == BMSYMBOL_VALUE_ADDRESS (msymbol))
+	else if (mfunsym.value_address ()
+		 == msymbol.value_address ())
 	  /* Avoid infinite recursion */
 	  /* See above comment about why warning is commented out.  */
 	  /* warning ("In stub for %s; unable to find real function/line info",
@@ -3262,12 +3151,11 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
 	    /* Detect an obvious case of infinite recursion.  If this
 	       should occur, we'd like to know about it, so error out,
 	       fatally.  */
-	    if (BMSYMBOL_VALUE_ADDRESS (mfunsym) == pc)
-	      internal_error (__FILE__, __LINE__,
-		_("Infinite recursion detected in find_pc_sect_line;"
+	    if (mfunsym.value_address () == pc)
+	      internal_error (_("Infinite recursion detected in find_pc_sect_line;"
 		  "please file a bug report"));
 
-	    return find_pc_line (BMSYMBOL_VALUE_ADDRESS (mfunsym), 0);
+	    return find_pc_line (mfunsym.value_address (), 0);
 	  }
       }
 
@@ -3397,7 +3285,7 @@ find_pc_sect_line (CORE_ADDR pc, struct obj_section *section, int notcurrent)
       else if (alt)
 	val.end = alt->pc;
       else
-	val.end = BLOCK_END (BLOCKVECTOR_BLOCK (bv, GLOBAL_BLOCK));
+	val.end = bv->global_block ()->end ();
     }
   val.section = section;
   return val;
@@ -3720,7 +3608,7 @@ find_function_start_sal_1 (CORE_ADDR func_addr, obj_section *section,
       && (sal.symtab->compunit ()->locations_valid ()
 	  || sal.symtab->language () == language_asm))
     {
-      struct gdbarch *gdbarch = sal.symtab->objfile ()->arch ();
+      struct gdbarch *gdbarch = sal.symtab->compunit ()->objfile ()->arch ();
 
       sal.pc = func_addr;
       if (gdbarch_skip_entrypoint_p (gdbarch))
@@ -3770,8 +3658,8 @@ find_function_start_sal (symbol *sym, bool funfirstline)
 {
   fixup_symbol_section (sym, NULL);
   symtab_and_line sal
-    = find_function_start_sal_1 (BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym)),
-				 sym->obj_section (symbol_objfile (sym)),
+    = find_function_start_sal_1 (sym->value_block ()->entry_pc (),
+				 sym->obj_section (sym->objfile ()),
 				 funfirstline);
   sal.symbol = sym;
   return sal;
@@ -3818,6 +3706,44 @@ skip_prologue_using_lineinfo (CORE_ADDR func_addr, struct symtab *symtab)
   return func_addr;
 }
 
+/* Try to locate the address where a breakpoint should be placed past the
+   prologue of function starting at FUNC_ADDR using the line table.
+
+   Return the address associated with the first entry in the line-table for
+   the function starting at FUNC_ADDR which has prologue_end set to true if
+   such entry exist, otherwise return an empty optional.  */
+
+static gdb::optional<CORE_ADDR>
+skip_prologue_using_linetable (CORE_ADDR func_addr)
+{
+  CORE_ADDR start_pc, end_pc;
+
+  if (!find_pc_partial_function (func_addr, nullptr, &start_pc, &end_pc))
+    return {};
+
+  const struct symtab_and_line prologue_sal = find_pc_line (start_pc, 0);
+  if (prologue_sal.symtab != nullptr
+      && prologue_sal.symtab->language () != language_asm)
+    {
+      struct linetable *linetable = prologue_sal.symtab->linetable ();
+
+      auto it = std::lower_bound
+	(linetable->item, linetable->item + linetable->nitems, start_pc,
+	 [] (const linetable_entry &lte, CORE_ADDR pc) -> bool
+	 {
+	   return lte.pc < pc;
+	 });
+
+      for (;
+	   it < linetable->item + linetable->nitems && it->pc < end_pc;
+	   it++)
+	if (it->prologue_end)
+	  return {it->pc};
+    }
+
+  return {};
+}
+
 /* Adjust SAL to the first instruction past the function prologue.
    If the PC was explicitly specified, the SAL is not changed.
    If the line number was explicitly specified then the SAL can still be
@@ -3860,8 +3786,8 @@ skip_prologue_sal (struct symtab_and_line *sal)
     {
       fixup_symbol_section (sym, NULL);
 
-      objfile = symbol_objfile (sym);
-      pc = BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym));
+      objfile = sym->objfile ();
+      pc = sym->value_block ()->entry_pc ();
       section = sym->obj_section (objfile);
       name = sym->linkage_name ();
     }
@@ -3874,7 +3800,7 @@ skip_prologue_sal (struct symtab_and_line *sal)
 	return;
 
       objfile = msymbol.objfile;
-      pc = BMSYMBOL_VALUE_ADDRESS (msymbol);
+      pc = msymbol.value_address ();
       section = msymbol.minsym->obj_section (objfile);
       name = msymbol.minsym->linkage_name ();
     }
@@ -3893,13 +3819,28 @@ skip_prologue_sal (struct symtab_and_line *sal)
      have proven the CU (Compilation Unit) supports it.  sal->SYMTAB does not
      have to be set by the caller so we use SYM instead.  */
   if (sym != NULL
-      && symbol_symtab (sym)->compunit ()->locations_valid ())
+      && sym->symtab ()->compunit ()->locations_valid ())
     force_skip = 0;
 
   saved_pc = pc;
   do
     {
       pc = saved_pc;
+
+      /* Check if the compiler explicitly indicated where a breakpoint should
+         be placed to skip the prologue.  */
+      if (!ignore_prologue_end_flag && skip)
+	{
+	  gdb::optional<CORE_ADDR> linetable_pc
+	    = skip_prologue_using_linetable (pc);
+	  if (linetable_pc)
+	    {
+	      pc = *linetable_pc;
+	      start_sal = find_pc_sect_line (pc, section, 0);
+	      force_skip = 1;
+	      continue;
+	    }
+	}
 
       /* If the function is in an unmapped overlay, use its unmapped LMA address,
 	 so that gdbarch_skip_prologue has something unique to work on.  */
@@ -3922,8 +3863,8 @@ skip_prologue_sal (struct symtab_and_line *sal)
       /* Check if gdbarch_skip_prologue left us in mid-line, and the next
 	 line is still part of the same function.  */
       if (skip && start_sal.pc != pc
-	  && (sym ? (BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym)) <= start_sal.end
-		     && start_sal.end < BLOCK_END (SYMBOL_BLOCK_VALUE (sym)))
+	  && (sym ? (sym->value_block ()->entry_pc () <= start_sal.end
+		     && start_sal.end < sym->value_block()->end ())
 	      : (lookup_minimal_symbol_by_pc_section (start_sal.end, section).minsym
 		 == lookup_minimal_symbol_by_pc_section (pc, section).minsym)))
 	{
@@ -3958,7 +3899,7 @@ skip_prologue_sal (struct symtab_and_line *sal)
      is aligned.  */
   if (!force_skip && sym && start_sal.symtab == NULL)
     {
-      pc = skip_prologue_using_lineinfo (pc, symbol_symtab (sym));
+      pc = skip_prologue_using_lineinfo (pc, sym->symtab ());
       /* Recalculate the line number.  */
       start_sal = find_pc_sect_line (pc, section, 0);
     }
@@ -3980,17 +3921,17 @@ skip_prologue_sal (struct symtab_and_line *sal)
   function_block = NULL;
   while (b != NULL)
     {
-      if (BLOCK_FUNCTION (b) != NULL && block_inlined_p (b))
+      if (b->function () != NULL && block_inlined_p (b))
 	function_block = b;
-      else if (BLOCK_FUNCTION (b) != NULL)
+      else if (b->function () != NULL)
 	break;
-      b = BLOCK_SUPERBLOCK (b);
+      b = b->superblock ();
     }
   if (function_block != NULL
-      && BLOCK_FUNCTION (function_block)->line () != 0)
+      && function_block->function ()->line () != 0)
     {
-      sal->line = BLOCK_FUNCTION (function_block)->line ();
-      sal->symtab = symbol_symtab (BLOCK_FUNCTION (function_block));
+      sal->line = function_block->function ()->line ();
+      sal->symtab = function_block->function ()->symtab ();
     }
 }
 
@@ -4078,12 +4019,12 @@ skip_prologue_using_sal (struct gdbarch *gdbarch, CORE_ADDR func_addr)
 	    {
 	      if (block_inlined_p (bl))
 		break;
-	      if (BLOCK_FUNCTION (bl))
+	      if (bl->function ())
 		{
 		  bl = NULL;
 		  break;
 		}
-	      bl = BLOCK_SUPERBLOCK (bl);
+	      bl = bl->superblock ();
 	    }
 	  if (bl != NULL)
 	    break;
@@ -4120,7 +4061,7 @@ find_function_alias_target (bound_minimal_symbol msymbol)
   symbol *sym = find_pc_function (func_addr);
   if (sym != NULL
       && sym->aclass () == LOC_BLOCK
-      && BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym)) == func_addr)
+      && sym->value_block ()->entry_pc () == func_addr)
     return sym;
 
   return NULL;
@@ -4630,8 +4571,8 @@ symbol_search::compare_search_syms (const symbol_search &sym_a,
 {
   int c;
 
-  c = FILENAME_CMP (symbol_symtab (sym_a.symbol)->filename,
-		    symbol_symtab (sym_b.symbol)->filename);
+  c = FILENAME_CMP (sym_a.symbol->symtab ()->filename,
+		    sym_b.symbol->symtab ()->filename);
   if (c != 0)
     return c;
 
@@ -4651,12 +4592,8 @@ treg_matches_sym_type_name (const compiled_regex &treg,
   struct type *sym_type;
   std::string printed_sym_type_name;
 
-  if (symbol_lookup_debug > 1)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "treg_matches_sym_type_name\n     sym %s\n",
-			  sym->natural_name ());
-    }
+  symbol_lookup_debug_printf_v ("treg_matches_sym_type_name, sym %s",
+				sym->natural_name ());
 
   sym_type = sym->type ();
   if (sym_type == NULL)
@@ -4668,14 +4605,8 @@ treg_matches_sym_type_name (const compiled_regex &treg,
     printed_sym_type_name = type_to_string (sym_type);
   }
 
-
-  if (symbol_lookup_debug > 1)
-    {
-      fprintf_unfiltered (gdb_stdlog,
-			  "     sym_type_name %s\n",
-			  printed_sym_type_name.c_str ());
-    }
-
+  symbol_lookup_debug_printf_v ("sym_type_name %s",
+				printed_sym_type_name.c_str ());
 
   if (printed_sym_type_name.empty ())
     return false;
@@ -4689,7 +4620,7 @@ bool
 global_symbol_searcher::is_suitable_msymbol
 	(const enum search_domain kind, const minimal_symbol *msymbol)
 {
-  switch (MSYMBOL_TYPE (msymbol))
+  switch (msymbol->type ())
     {
     case mst_data:
     case mst_bss:
@@ -4773,8 +4704,7 @@ global_symbol_searcher::expand_symtabs
 		     the symbols tables are expanded.  */
 		  if (kind == FUNCTIONS_DOMAIN
 		      ? (find_pc_compunit_symtab
-			 (MSYMBOL_VALUE_ADDRESS (objfile, msymbol))
-			 == NULL)
+			 (msymbol->value_address (objfile)) == NULL)
 		      : (lookup_symbol_in_objfile_from_linkage_name
 			 (objfile, msymbol->linkage_name (),
 			  VAR_DOMAIN)
@@ -4808,11 +4738,11 @@ global_symbol_searcher::add_matching_symbols
 	{
 	  struct block_iterator iter;
 	  struct symbol *sym;
-	  const struct block *b = BLOCKVECTOR_BLOCK (bv, block);
+	  const struct block *b = bv->block (block);
 
 	  ALL_BLOCK_SYMBOLS (b, iter, sym)
 	    {
-	      struct symtab *real_symtab = symbol_symtab (sym);
+	      struct symtab *real_symtab = sym->symtab ();
 
 	      QUIT;
 
@@ -4896,8 +4826,7 @@ global_symbol_searcher::add_matching_msymbols
 		 symbol might be found via find_pc_symtab.  */
 	      if (kind != FUNCTIONS_DOMAIN
 		  || (find_pc_compunit_symtab
-		      (MSYMBOL_VALUE_ADDRESS (objfile, msymbol))
-		      == NULL))
+		      (msymbol->value_address (objfile)) == NULL))
 		{
 		  if (lookup_symbol_in_objfile_from_linkage_name
 		      (objfile, msymbol->linkage_name (),
@@ -4930,6 +4859,7 @@ global_symbol_searcher::search () const
   if (m_symbol_name_regexp != NULL)
     {
       const char *symbol_name_regexp = m_symbol_name_regexp;
+      std::string symbol_name_regexp_holder;
 
       /* Make sure spacing is right for C++ operators.
 	 This is just a courtesy to make the matching less sensitive
@@ -4958,10 +4888,9 @@ global_symbol_searcher::search () const
 	  /* If wrong number of spaces, fix it.  */
 	  if (fix >= 0)
 	    {
-	      char *tmp = (char *) alloca (8 + fix + strlen (opname) + 1);
-
-	      sprintf (tmp, "operator%.*s%s", fix, " ", opname);
-	      symbol_name_regexp = tmp;
+	      symbol_name_regexp_holder
+		= string_printf ("operator%.*s%s", fix, " ", opname);
+	      symbol_name_regexp = symbol_name_regexp_holder.c_str ();
 	    }
 	}
 
@@ -5086,7 +5015,7 @@ print_symbol_info (enum search_domain kind,
 		   int block, const char *last)
 {
   scoped_switch_to_sym_language_if_auto l (sym);
-  struct symtab *s = symbol_symtab (sym);
+  struct symtab *s = sym->symtab ();
 
   if (last != NULL)
     {
@@ -5094,19 +5023,19 @@ print_symbol_info (enum search_domain kind,
 
       if (filename_cmp (last, s_filename) != 0)
 	{
-	  printf_filtered (_("\nFile %ps:\n"),
-			   styled_string (file_name_style.style (),
-					  s_filename));
+	  gdb_printf (_("\nFile %ps:\n"),
+		      styled_string (file_name_style.style (),
+				     s_filename));
 	}
 
       if (sym->line () != 0)
-	printf_filtered ("%d:\t", sym->line ());
+	gdb_printf ("%d:\t", sym->line ());
       else
-	puts_filtered ("\t");
+	gdb_puts ("\t");
     }
 
   std::string str = symbol_to_info_string (sym, block, kind);
-  printf_filtered ("%s\n", str.c_str ());
+  gdb_printf ("%s\n", str.c_str ());
 }
 
 /* This help function for symtab_symbol_info() prints information
@@ -5119,20 +5048,20 @@ print_msymbol_info (struct bound_minimal_symbol msymbol)
   char *tmp;
 
   if (gdbarch_addr_bit (gdbarch) <= 32)
-    tmp = hex_string_custom (BMSYMBOL_VALUE_ADDRESS (msymbol)
+    tmp = hex_string_custom (msymbol.value_address ()
 			     & (CORE_ADDR) 0xffffffff,
 			     8);
   else
-    tmp = hex_string_custom (BMSYMBOL_VALUE_ADDRESS (msymbol),
+    tmp = hex_string_custom (msymbol.value_address (),
 			     16);
 
   ui_file_style sym_style = (msymbol.minsym->text_p ()
 			     ? function_name_style.style ()
 			     : ui_file_style ());
 
-  printf_filtered (_("%ps  %ps\n"),
-		   styled_string (address_style.style (), tmp),
-		   styled_string (sym_style, msymbol.minsym->print_name ()));
+  gdb_printf (_("%ps  %ps\n"),
+	      styled_string (address_style.style (), tmp),
+	      styled_string (sym_style, msymbol.minsym->print_name ()));
 }
 
 /* This is the guts of the commands "info functions", "info types", and
@@ -5165,23 +5094,23 @@ symtab_symbol_info (bool quiet, bool exclude_minsyms,
       if (regexp != NULL)
 	{
 	  if (t_regexp != NULL)
-	    printf_filtered
+	    gdb_printf
 	      (_("All %ss matching regular expression \"%s\""
 		 " with type matching regular expression \"%s\":\n"),
 	       classnames[kind], regexp, t_regexp);
 	  else
-	    printf_filtered (_("All %ss matching regular expression \"%s\":\n"),
-			     classnames[kind], regexp);
+	    gdb_printf (_("All %ss matching regular expression \"%s\":\n"),
+			classnames[kind], regexp);
 	}
       else
 	{
 	  if (t_regexp != NULL)
-	    printf_filtered
+	    gdb_printf
 	      (_("All defined %ss"
 		 " with type matching regular expression \"%s\" :\n"),
 	       classnames[kind], t_regexp);
 	  else
-	    printf_filtered (_("All defined %ss:\n"), classnames[kind]);
+	    gdb_printf (_("All defined %ss:\n"), classnames[kind]);
 	}
     }
 
@@ -5194,7 +5123,7 @@ symtab_symbol_info (bool quiet, bool exclude_minsyms,
 	  if (first)
 	    {
 	      if (!quiet)
-		printf_filtered (_("\nNon-debugging symbols:\n"));
+		gdb_printf (_("\nNon-debugging symbols:\n"));
 	      first = 0;
 	    }
 	  print_msymbol_info (p.msymbol);
@@ -5206,7 +5135,7 @@ symtab_symbol_info (bool quiet, bool exclude_minsyms,
 			     p.block,
 			     last_filename);
 	  last_filename
-	    = symtab_to_filename_for_display (symbol_symtab (p.symbol));
+	    = symtab_to_filename_for_display (p.symbol->symtab ());
 	}
     }
 }
@@ -5426,7 +5355,7 @@ rbreak_command (const char *regexp, int from_tty)
     {
       if (p.msymbol.minsym == NULL)
 	{
-	  struct symtab *symtab = symbol_symtab (p.symbol);
+	  struct symtab *symtab = p.symbol->symtab ();
 	  const char *fullname = symtab_to_fullname (symtab);
 
 	  string = string_printf ("%s:'%s'", fullname,
@@ -5440,8 +5369,8 @@ rbreak_command (const char *regexp, int from_tty)
 				  p.msymbol.minsym->linkage_name ());
 
 	  break_command (&string[0], from_tty);
-	  printf_filtered ("<function, no debug info> %s;\n",
-			   p.msymbol.minsym->print_name ());
+	  gdb_printf ("<function, no debug info> %s;\n",
+		      p.msymbol.minsym->print_name ());
 	}
     }
 }
@@ -5707,7 +5636,7 @@ symbol_is_function_or_method (symbol *sym)
 bool
 symbol_is_function_or_method (minimal_symbol *msymbol)
 {
-  switch (MSYMBOL_TYPE (msymbol))
+  switch (msymbol->type ())
     {
     case mst_text:
     case mst_text_gnu_ifunc:
@@ -5729,19 +5658,19 @@ find_gnu_ifunc (const symbol *sym)
 
   lookup_name_info lookup_name (sym->search_name (),
 				symbol_name_match_type::SEARCH_NAME);
-  struct objfile *objfile = symbol_objfile (sym);
+  struct objfile *objfile = sym->objfile ();
 
-  CORE_ADDR address = BLOCK_ENTRY_PC (SYMBOL_BLOCK_VALUE (sym));
+  CORE_ADDR address = sym->value_block ()->entry_pc ();
   minimal_symbol *ifunc = NULL;
 
   iterate_over_minimal_symbols (objfile, lookup_name,
 				[&] (minimal_symbol *minsym)
     {
-      if (MSYMBOL_TYPE (minsym) == mst_text_gnu_ifunc
-	  || MSYMBOL_TYPE (minsym) == mst_data_gnu_ifunc)
+      if (minsym->type () == mst_text_gnu_ifunc
+	  || minsym->type () == mst_data_gnu_ifunc)
 	{
-	  CORE_ADDR msym_addr = MSYMBOL_VALUE_ADDRESS (objfile, minsym);
-	  if (MSYMBOL_TYPE (minsym) == mst_data_gnu_ifunc)
+	  CORE_ADDR msym_addr = minsym->value_address (objfile);
+	  if (minsym->type () == mst_data_gnu_ifunc)
 	    {
 	      struct gdbarch *gdbarch = objfile->arch ();
 	      msym_addr = gdbarch_convert_from_func_ptr_addr
@@ -5772,7 +5701,6 @@ add_symtab_completions (struct compunit_symtab *cust,
 			enum type_code code)
 {
   struct symbol *sym;
-  const struct block *b;
   struct block_iterator iter;
   int i;
 
@@ -5782,7 +5710,8 @@ add_symtab_completions (struct compunit_symtab *cust,
   for (i = GLOBAL_BLOCK; i <= STATIC_BLOCK; i++)
     {
       QUIT;
-      b = BLOCKVECTOR_BLOCK (cust->blockvector (), i);
+
+      const struct block *b = cust->blockvector ()->block (i);
       ALL_BLOCK_SYMBOLS (b, iter, sym)
 	{
 	  if (completion_skip_symbol (mode, sym))
@@ -5951,9 +5880,9 @@ default_collect_symbol_completion_matches_break_on
 	/* Stop when we encounter an enclosing function.  Do not stop for
 	   non-inlined functions - the locals of the enclosing function
 	   are in scope for a nested function.  */
-	if (BLOCK_FUNCTION (b) != NULL && block_inlined_p (b))
+	if (b->function () != NULL && block_inlined_p (b))
 	  break;
-	b = BLOCK_SUPERBLOCK (b);
+	b = b->superblock ();
       }
 
   /* Add fields from the file's types; symbols will be added below.  */
@@ -6351,13 +6280,25 @@ find_main_name (void)
      Fallback to "main".  */
 
   /* Try to find language for main in psymtabs.  */
-  enum language lang
-    = find_quick_global_symbol_language ("main", VAR_DOMAIN);
-  if (lang != language_unknown)
-    {
-      set_main_name ("main", lang);
-      return;
-    }
+  bool symbol_found_p = false;
+  gdbarch_iterate_over_objfiles_in_search_order
+    (target_gdbarch (),
+     [&symbol_found_p] (objfile *obj)
+       {
+	 language lang
+	   = obj->lookup_global_symbol_language ("main", VAR_DOMAIN,
+						 &symbol_found_p);
+	 if (symbol_found_p)
+	   {
+	     set_main_name ("main", lang);
+	     return 1;
+	   }
+
+	 return 0;
+       }, nullptr);
+
+  if (symbol_found_p)
+    return;
 
   set_main_name ("main", language_unknown);
 }
@@ -6442,7 +6383,7 @@ static struct symbol_impl symbol_impl[MAX_SYMBOL_IMPLS];
 /* The globally visible pointer.  This is separate from 'symbol_impl'
    so that it can be const.  */
 
-const struct symbol_impl *symbol_impls = &symbol_impl[0];
+gdb::array_view<const struct symbol_impl> symbol_impls (symbol_impl);
 
 /* Make sure we saved enough room in struct symbol.  */
 
@@ -6533,38 +6474,38 @@ initialize_ordinary_address_classes (void)
 /* See symtab.h.  */
 
 struct objfile *
-symbol_objfile (const struct symbol *symbol)
+symbol::objfile () const
 {
-  gdb_assert (symbol->is_objfile_owned ());
-  return symbol->owner.symtab->objfile ();
+  gdb_assert (is_objfile_owned ());
+  return owner.symtab->compunit ()->objfile ();
 }
 
 /* See symtab.h.  */
 
 struct gdbarch *
-symbol_arch (const struct symbol *symbol)
+symbol::arch () const
 {
-  if (!symbol->is_objfile_owned ())
-    return symbol->owner.arch;
-  return symbol->owner.symtab->objfile ()->arch ();
+  if (!is_objfile_owned ())
+    return owner.arch;
+  return owner.symtab->compunit ()->objfile ()->arch ();
 }
 
 /* See symtab.h.  */
 
 struct symtab *
-symbol_symtab (const struct symbol *symbol)
+symbol::symtab () const
 {
-  gdb_assert (symbol->is_objfile_owned ());
-  return symbol->owner.symtab;
+  gdb_assert (is_objfile_owned ());
+  return owner.symtab;
 }
 
 /* See symtab.h.  */
 
 void
-symbol_set_symtab (struct symbol *symbol, struct symtab *symtab)
+symbol::set_symtab (struct symtab *symtab)
 {
-  gdb_assert (symbol->is_objfile_owned ());
-  symbol->owner.symtab = symtab;
+  gdb_assert (is_objfile_owned ());
+  owner.symtab = symtab;
 }
 
 /* See symtab.h.  */
@@ -6585,9 +6526,9 @@ get_symbol_address (const struct symbol *sym)
       bound_minimal_symbol minsym
 	= lookup_minimal_symbol_linkage (linkage_name, objfile);
       if (minsym.minsym != nullptr)
-	return BMSYMBOL_VALUE_ADDRESS (minsym);
+	return minsym.value_address ();
     }
-  return sym->value.address;
+  return sym->m_value.address;
 }
 
 /* See symtab.h.  */
@@ -6608,10 +6549,10 @@ get_msymbol_address (struct objfile *objf, const struct minimal_symbol *minsym)
 	  bound_minimal_symbol found
 	    = lookup_minimal_symbol_linkage (linkage_name, objfile);
 	  if (found.minsym != nullptr)
-	    return BMSYMBOL_VALUE_ADDRESS (found);
+	    return found.value_address ();
 	}
     }
-  return (minsym->value.address
+  return (minsym->m_value.address
 	  + objf->section_offsets[minsym->section_index ()]);
 }
 
@@ -6687,11 +6628,11 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 	  if (type_regexp == nullptr)
 	    {
 	      if (regexp == nullptr)
-		printf_filtered ((kind == VARIABLES_DOMAIN
-				  ? _("All variables in all modules:")
-				  : _("All functions in all modules:")));
+		gdb_printf ((kind == VARIABLES_DOMAIN
+			     ? _("All variables in all modules:")
+			     : _("All functions in all modules:")));
 	      else
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables matching regular expression"
 			" \"%s\" in all modules:")
@@ -6702,7 +6643,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 	  else
 	    {
 	      if (regexp == nullptr)
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables with type matching regular "
 			"expression \"%s\" in all modules:")
@@ -6710,7 +6651,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 			"expression \"%s\" in all modules:")),
 		   type_regexp);
 	      else
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables matching regular expression "
 			"\"%s\",\n\twith type matching regular "
@@ -6726,7 +6667,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 	  if (type_regexp == nullptr)
 	    {
 	      if (regexp == nullptr)
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables in all modules matching regular "
 			"expression \"%s\":")
@@ -6734,7 +6675,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 			"expression \"%s\":")),
 		   module_regexp);
 	      else
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables matching regular expression "
 			"\"%s\",\n\tin all modules matching regular "
@@ -6747,7 +6688,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 	  else
 	    {
 	      if (regexp == nullptr)
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables with type matching regular "
 			"expression \"%s\"\n\tin all modules matching "
@@ -6757,7 +6698,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 			"regular expression \"%s\":")),
 		   type_regexp, module_regexp);
 	      else
-		printf_filtered
+		gdb_printf
 		  ((kind == VARIABLES_DOMAIN
 		    ? _("All variables matching regular expression "
 			"\"%s\",\n\twith type matching regular expression "
@@ -6770,7 +6711,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 		   regexp, type_regexp, module_regexp);
 	    }
 	}
-      printf_filtered ("\n");
+      gdb_printf ("\n");
     }
 
   /* Find all symbols of type KIND matching the given regular expressions
@@ -6801,8 +6742,8 @@ info_module_subcommand (bool quiet, const char *module_regexp,
 
       if (last_module_symbol != p.symbol)
 	{
-	  printf_filtered ("\n");
-	  printf_filtered (_("Module \"%s\":\n"), p.symbol->print_name ());
+	  gdb_printf ("\n");
+	  gdb_printf (_("Module \"%s\":\n"), p.symbol->print_name ());
 	  last_module_symbol = p.symbol;
 	  last_filename = "";
 	}
@@ -6810,7 +6751,7 @@ info_module_subcommand (bool quiet, const char *module_regexp,
       print_symbol_info (FUNCTIONS_DOMAIN, q.symbol, q.block,
 			 last_filename);
       last_filename
-	= symtab_to_filename_for_display (symbol_symtab (q.symbol));
+	= symtab_to_filename_for_display (q.symbol->symtab ());
     }
 }
 
@@ -6932,17 +6873,6 @@ Prints the global and static variables.\n"),
 				      _("global and static variables"),
 				      true));
   set_cmd_completer_handle_brkchars (c, info_vars_funcs_command_completer);
-  if (dbx_commands)
-    {
-      c = add_com ("whereis", class_info, info_variables_command,
-		   info_print_args_help (_("\
-All global and static variable names, or those matching REGEXPs.\n\
-Usage: whereis [-q] [-n] [-t TYPEREGEXP] [NAMEREGEXP]\n\
-Prints the global and static variables.\n"),
-					 _("global and static variables"),
-					 true));
-      set_cmd_completer_handle_brkchars (c, info_vars_funcs_command_completer);
-    }
 
   c = add_info ("functions", info_functions_command,
 		info_print_args_help (_("\
@@ -7070,6 +7000,19 @@ If zero then the symbol cache is disabled."),
 			     set_symbol_cache_size_handler, NULL,
 			     &maintenance_set_cmdlist,
 			     &maintenance_show_cmdlist);
+
+  add_setshow_boolean_cmd ("ignore-prologue-end-flag", no_class,
+			   &ignore_prologue_end_flag,
+			   _("Set if the PROLOGUE-END flag is ignored."),
+			   _("Show if the PROLOGUE-END flag is ignored."),
+			   _("\
+The PROLOGUE-END flag from the line-table entries is used to place \
+breakpoints past the prologue of functions.  Disabeling its use use forces \
+the use of prologue scanners."),
+			   nullptr, nullptr,
+			   &maintenance_set_cmdlist,
+			   &maintenance_show_cmdlist);
+
 
   add_cmd ("symbol-cache", class_maintenance, maintenance_print_symbol_cache,
 	   _("Dump the symbol cache for each program space."),

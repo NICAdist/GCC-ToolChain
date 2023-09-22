@@ -1,6 +1,6 @@
 /* Select target systems and architectures at runtime for GDB.
 
-   Copyright (C) 1990-2022 Free Software Foundation, Inc.
+   Copyright (C) 1990-2023 Free Software Foundation, Inc.
 
    Contributed by Cygnus Support.
 
@@ -40,7 +40,7 @@
 #include "exec.h"
 #include "inline-frame.h"
 #include "tracepoint.h"
-#include "gdb/fileio.h"
+#include "gdbsupport/fileio.h"
 #include "gdbsupport/agent.h"
 #include "auxv.h"
 #include "target-debug.h"
@@ -159,7 +159,7 @@ static void
 show_targetdebug (struct ui_file *file, int from_tty,
 		  struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file, _("Target debugging is %s.\n"), value);
+  gdb_printf (file, _("Target debugging is %s.\n"), value);
 }
 
 int
@@ -423,7 +423,7 @@ target_extra_thread_info (thread_info *tp)
 
 /* See target.h.  */
 
-char *
+const char *
 target_pid_to_exec_file (int pid)
 {
   return current_inferior ()->top_target ()->pid_to_exec_file (pid);
@@ -847,14 +847,14 @@ open_target (const char *args, int from_tty, struct cmd_list_element *command)
   target_open_ftype *func = target_factories[ti];
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog, "-> %s->open (...)\n",
-			ti->shortname);
+    gdb_printf (gdb_stdlog, "-> %s->open (...)\n",
+		ti->shortname);
 
   func (args, from_tty);
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog, "<- %s->open (%s, %d)\n",
-			ti->shortname, args, from_tty);
+    gdb_printf (gdb_stdlog, "<- %s->open (%s, %d)\n",
+		ti->shortname, args, from_tty);
 }
 
 /* See target.h.  */
@@ -867,8 +867,7 @@ add_target (const target_info &t, target_open_ftype *func,
 
   auto &func_slot = target_factories[&t];
   if (func_slot != nullptr)
-    internal_error (__FILE__, __LINE__,
-		    _("target already added (\"%s\")."), t.shortname);
+    internal_error (_("target already added (\"%s\")."), t.shortname);
   func_slot = func;
 
   if (targetlist == NULL)
@@ -908,6 +907,15 @@ add_deprecated_target_alias (const target_info &tinfo, const char *alias)
 void
 target_kill (void)
 {
+
+  /* If the commit_resume_state of the to-be-killed-inferior's process stratum
+     is true, and this inferior is the last live inferior with resumed threads
+     of that target, then we want to leave commit_resume_state to false, as the
+     target won't have any resumed threads anymore.  We achieve this with
+     this scoped_disable_commit_resumed.  On construction, it will set the flag
+     to false.  On destruction, it will only set it to true if there are resumed
+     threads left.  */
+  scoped_disable_commit_resumed disable ("killing");
   current_inferior ()->top_target ()->kill ();
 }
 
@@ -1128,7 +1136,7 @@ noprocess (void)
 static void
 default_terminal_info (struct target_ops *self, const char *args, int from_tty)
 {
-  printf_filtered (_("No saved terminal information.\n"));
+  gdb_printf (_("No saved terminal information.\n"));
 }
 
 /* A default implementation for the to_get_ada_task_ptid target method.
@@ -1158,7 +1166,7 @@ to_execution_direction must be implemented for reverse async");
 /* See target.h.  */
 
 void
-decref_target (target_ops *t)
+target_ops_ref_policy::decref (target_ops *t)
 {
   t->decref ();
   if (t->refcount () == 0)
@@ -1174,23 +1182,28 @@ decref_target (target_ops *t)
 void
 target_stack::push (target_ops *t)
 {
-  t->incref ();
+  /* We must create a new reference first.  It is possible that T is
+     already pushed on this target stack, in which case we will first
+     unpush it below, before re-pushing it.  If we don't increment the
+     reference count now, then when we unpush it, we might end up deleting
+     T, which is not good.  */
+  auto ref = target_ops_ref::new_reference (t);
 
   strata stratum = t->stratum ();
 
-  if (stratum == process_stratum)
-    connection_list_add (as_process_stratum_target (t));
-
   /* If there's already a target at this stratum, remove it.  */
 
-  if (m_stack[stratum] != NULL)
-    unpush (m_stack[stratum]);
+  if (m_stack[stratum].get () != nullptr)
+    unpush (m_stack[stratum].get ());
 
   /* Now add the new one.  */
-  m_stack[stratum] = t;
+  m_stack[stratum] = std::move (ref);
 
   if (m_top < stratum)
     m_top = stratum;
+
+  if (stratum == process_stratum)
+    connection_list_add (as_process_stratum_target (t));
 }
 
 /* See target.h.  */
@@ -1203,8 +1216,7 @@ target_stack::unpush (target_ops *t)
   strata stratum = t->stratum ();
 
   if (stratum == dummy_stratum)
-    internal_error (__FILE__, __LINE__,
-		    _("Attempt to unpush the dummy target"));
+    internal_error (_("Attempt to unpush the dummy target"));
 
   /* Look for the specified target.  Note that a target can only occur
      once in the target stack.  */
@@ -1216,60 +1228,21 @@ target_stack::unpush (target_ops *t)
       return false;
     }
 
-  /* Unchain the target.  */
-  m_stack[stratum] = NULL;
-
   if (m_top == stratum)
     m_top = this->find_beneath (t)->stratum ();
 
-  /* Finally close the target, if there are no inferiors
-     referencing this target still.  Note we do this after unchaining,
-     so any target method calls from within the target_close
-     implementation don't end up in T anymore.  Do leave the target
-     open if we have are other inferiors referencing this target
-     still.  */
-  decref_target (t);
+  /* Move the target reference off the target stack, this sets the pointer
+     held in m_stack to nullptr, and places the reference in ref.  When
+     ref goes out of scope its reference count will be decremented, which
+     might cause the target to close.
+
+     We have to do it this way, and not just set the value in m_stack to
+     nullptr directly, because doing so would decrement the reference
+     count first, which might close the target, and closing the target
+     does a check that the target is not on any inferiors target_stack.  */
+  auto ref = std::move (m_stack[stratum]);
 
   return true;
-}
-
-/* Unpush TARGET and assert that it worked.  */
-
-static void
-unpush_target_and_assert (struct target_ops *target)
-{
-  if (!current_inferior ()->unpush_target (target))
-    {
-      fprintf_unfiltered (gdb_stderr,
-			  "pop_all_targets couldn't find target %s\n",
-			  target->shortname ());
-      internal_error (__FILE__, __LINE__,
-		      _("failed internal consistency check"));
-    }
-}
-
-void
-pop_all_targets_above (enum strata above_stratum)
-{
-  while ((int) (current_inferior ()->top_target ()->stratum ())
-	 > (int) above_stratum)
-    unpush_target_and_assert (current_inferior ()->top_target ());
-}
-
-/* See target.h.  */
-
-void
-pop_all_targets_at_and_above (enum strata stratum)
-{
-  while ((int) (current_inferior ()->top_target ()->stratum ())
-	 >= (int) stratum)
-    unpush_target_and_assert (current_inferior ()->top_target ());
-}
-
-void
-pop_all_targets (void)
-{
-  pop_all_targets_above (dummy_stratum);
 }
 
 void
@@ -1393,26 +1366,6 @@ target_xfer_status_to_string (enum target_xfer_status status)
 #undef CASE
 };
 
-
-/* See target.h.  */
-
-gdb::unique_xmalloc_ptr<char>
-target_read_string (CORE_ADDR memaddr, int len, int *bytes_read)
-{
-  gdb::unique_xmalloc_ptr<gdb_byte> buffer;
-
-  int ignore;
-  if (bytes_read == nullptr)
-    bytes_read = &ignore;
-
-  /* Note that the endian-ness does not matter here.  */
-  int errcode = read_string (memaddr, -1, 1, len, BFD_ENDIAN_LITTLE,
-			     &buffer, bytes_read);
-  if (errcode != 0)
-    return {};
-
-  return gdb::unique_xmalloc_ptr<char> ((char *) buffer.release ());
-}
 
 const target_section_table *
 target_get_section_table (struct target_ops *target)
@@ -1664,7 +1617,7 @@ memory_xfer_partial (struct target_ops *ops, enum target_object object,
   if (len == 0)
     return TARGET_XFER_EOF;
 
-  memaddr = address_significant (target_gdbarch (), memaddr);
+  memaddr = gdbarch_remove_non_address_bits (target_gdbarch (), memaddr);
 
   /* Fill in READBUF with breakpoint shadows, or WRITEBUF with
      breakpoint insns, thus hiding out from higher layers whether
@@ -1754,17 +1707,17 @@ target_xfer_partial (struct target_ops *ops,
     {
       const unsigned char *myaddr = NULL;
 
-      fprintf_unfiltered (gdb_stdlog,
-			  "%s:target_xfer_partial "
-			  "(%d, %s, %s, %s, %s, %s) = %d, %s",
-			  ops->shortname (),
-			  (int) object,
-			  (annex ? annex : "(null)"),
-			  host_address_to_string (readbuf),
-			  host_address_to_string (writebuf),
-			  core_addr_to_string_nz (offset),
-			  pulongest (len), retval,
-			  pulongest (*xfered_len));
+      gdb_printf (gdb_stdlog,
+		  "%s:target_xfer_partial "
+		  "(%d, %s, %s, %s, %s, %s) = %d, %s",
+		  ops->shortname (),
+		  (int) object,
+		  (annex ? annex : "(null)"),
+		  host_address_to_string (readbuf),
+		  host_address_to_string (writebuf),
+		  core_addr_to_string_nz (offset),
+		  pulongest (len), retval,
+		  pulongest (*xfered_len));
 
       if (readbuf)
 	myaddr = readbuf;
@@ -1774,24 +1727,24 @@ target_xfer_partial (struct target_ops *ops,
 	{
 	  int i;
 
-	  fputs_unfiltered (", bytes =", gdb_stdlog);
+	  gdb_puts (", bytes =", gdb_stdlog);
 	  for (i = 0; i < *xfered_len; i++)
 	    {
 	      if ((((intptr_t) &(myaddr[i])) & 0xf) == 0)
 		{
 		  if (targetdebug < 2 && i > 0)
 		    {
-		      fprintf_unfiltered (gdb_stdlog, " ...");
+		      gdb_printf (gdb_stdlog, " ...");
 		      break;
 		    }
-		  fprintf_unfiltered (gdb_stdlog, "\n");
+		  gdb_printf (gdb_stdlog, "\n");
 		}
 
-	      fprintf_unfiltered (gdb_stdlog, " %02x", myaddr[i] & 0xff);
+	      gdb_printf (gdb_stdlog, " %02x", myaddr[i] & 0xff);
 	    }
 	}
 
-      fputc_unfiltered ('\n', gdb_stdlog);
+      gdb_putc ('\n', gdb_stdlog);
     }
 
   /* Check implementations of to_xfer_partial update *XFERED_LEN
@@ -1967,9 +1920,9 @@ static void
 show_trust_readonly (struct ui_file *file, int from_tty,
 		     struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file,
-		    _("Mode for reading from readonly sections is %s.\n"),
-		    value);
+  gdb_printf (file,
+	      _("Mode for reading from readonly sections is %s.\n"),
+	      value);
 }
 
 /* Target vector read/write partial wrapper functions.  */
@@ -2450,8 +2403,8 @@ info_target_command (const char *args, int from_tty)
   if (current_program_space->symfile_object_file != NULL)
     {
       objfile *objf = current_program_space->symfile_object_file;
-      printf_filtered (_("Symbols from \"%s\".\n"),
-		       objfile_name (objf));
+      gdb_printf (_("Symbols from \"%s\".\n"),
+		  objfile_name (objf));
     }
 
   for (target_ops *t = current_inferior ()->top_target ();
@@ -2464,9 +2417,9 @@ info_target_command (const char *args, int from_tty)
       if ((int) (t->stratum ()) <= (int) dummy_stratum)
 	continue;
       if (has_all_mem)
-	printf_filtered (_("\tWhile running this, "
-			   "GDB does not access memory from...\n"));
-      printf_filtered ("%s:\n", t->longname ());
+	gdb_printf (_("\tWhile running this, "
+		      "GDB does not access memory from...\n"));
+      gdb_printf ("%s:\n", t->longname ());
       t->files_info ();
       has_all_mem = t->has_all_memory ();
     }
@@ -2512,7 +2465,7 @@ target_pre_inferior (int from_tty)
 
   /* attach_flag may be set if the previous process associated with
      the inferior was attached to.  */
-  current_inferior ()->attach_flag = 0;
+  current_inferior ()->attach_flag = false;
 
   current_inferior ()->highest_thread_num = 0;
 
@@ -2548,7 +2501,7 @@ target_preopen (int from_tty)
      it doesn't (which seems like a win for UDI), remove it now.  */
   /* Leave the exec target, though.  The user may be switching from a
      live process to a core of the same program.  */
-  pop_all_targets_above (file_stratum);
+  current_inferior ()->pop_all_targets_above (file_stratum);
 
   target_pre_inferior (from_tty);
 }
@@ -2558,6 +2511,9 @@ target_preopen (int from_tty)
 void
 target_detach (inferior *inf, int from_tty)
 {
+  /* Thread's don't need to be resumed until the end of this function.  */
+  scoped_disable_commit_resumed disable_commit_resumed ("detaching");
+
   /* After we have detached, we will clear the register cache for this inferior
      by calling registers_changed_ptid.  We must save the pid_ptid before
      detaching, as the target detach method will clear inf->pid.  */
@@ -2588,6 +2544,8 @@ target_detach (inferior *inf, int from_tty)
      inferior_ptid matches save_pid_ptid, but in our case, it does not
      call it, as inferior_ptid has been reset.  */
   reinit_frame_cache ();
+
+  disable_commit_resumed.reset_and_commit ();
 }
 
 void
@@ -2675,24 +2633,27 @@ target_thread_info_to_thread_handle (struct thread_info *tip)
 }
 
 void
-target_resume (ptid_t ptid, int step, enum gdb_signal signal)
+target_resume (ptid_t scope_ptid, int step, enum gdb_signal signal)
 {
   process_stratum_target *curr_target = current_inferior ()->process_target ();
   gdb_assert (!curr_target->commit_resumed_state);
 
+  gdb_assert (inferior_ptid != null_ptid);
+  gdb_assert (inferior_ptid.matches (scope_ptid));
+
   target_dcache_invalidate ();
 
-  current_inferior ()->top_target ()->resume (ptid, step, signal);
+  current_inferior ()->top_target ()->resume (scope_ptid, step, signal);
 
-  registers_changed_ptid (curr_target, ptid);
+  registers_changed_ptid (curr_target, scope_ptid);
   /* We only set the internal executing state here.  The user/frontend
      running state is set at a higher level.  This also clears the
      thread's stop_pc as side effect.  */
-  set_executing (curr_target, ptid, true);
-  clear_inline_frame_state (curr_target, ptid);
+  set_executing (curr_target, scope_ptid, true);
+  clear_inline_frame_state (curr_target, scope_ptid);
 
   if (target_can_async_p ())
-    target_async (1);
+    target_async (true);
 }
 
 /* See target.h.  */
@@ -2730,8 +2691,7 @@ default_follow_fork (struct target_ops *self, inferior *child_inf,
 		     bool follow_child, bool detach_fork)
 {
   /* Some target returned a fork event, but did not know how to follow it.  */
-  internal_error (__FILE__, __LINE__,
-		  _("could not find a target to follow fork"));
+  internal_error (_("could not find a target to follow fork"));
 }
 
 /* See target.h.  */
@@ -2770,8 +2730,7 @@ target_follow_exec (inferior *follow_inf, ptid_t ptid,
 static void
 default_mourn_inferior (struct target_ops *self)
 {
-  internal_error (__FILE__, __LINE__,
-		  _("could not find a target to follow mourn inferior"));
+  internal_error (_("could not find a target to follow mourn inferior"));
 }
 
 void
@@ -2866,7 +2825,7 @@ target_require_runnable (void)
   /* This function is only called if the target is running.  In that
      case there should have been a process_stratum target and it
      should either know how to create inferiors, or not...  */
-  internal_error (__FILE__, __LINE__, _("No targets found"));
+  internal_error (_("No targets found"));
 }
 
 /* Whether GDB is allowed to fall back to the default run target for
@@ -2877,10 +2836,10 @@ static void
 show_auto_connect_native_target (struct ui_file *file, int from_tty,
 				 struct cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file,
-		    _("Whether GDB may automatically connect to the "
-		      "native target is %s.\n"),
-		    value);
+  gdb_printf (file,
+	      _("Whether GDB may automatically connect to the "
+		"native target is %s.\n"),
+	      value);
 }
 
 /* A pointer to the target that can respond to "run" or "attach".
@@ -2894,8 +2853,7 @@ void
 set_native_target (target_ops *target)
 {
   if (the_native_target != NULL)
-    internal_error (__FILE__, __LINE__,
-		    _("native target already set (\"%s\")."),
+    internal_error (_("native target already set (\"%s\")."),
 		    the_native_target->longname ());
 
   the_native_target = target;
@@ -2988,8 +2946,8 @@ target_info_proc (const char *args, enum info_proc_what what)
       if (t->info_proc (args, what))
 	{
 	  if (targetdebug)
-	    fprintf_unfiltered (gdb_stdlog,
-				"target_info_proc (\"%s\", %d)\n", args, what);
+	    gdb_printf (gdb_stdlog,
+			"target_info_proc (\"%s\", %d)\n", args, what);
 
 	  return 1;
 	}
@@ -3223,7 +3181,7 @@ fileio_fd_to_fh (int fd)
 int
 target_ops::fileio_open (struct inferior *inf, const char *filename,
 			 int flags, int mode, int warn_if_slow,
-			 int *target_errno)
+			 fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3231,7 +3189,7 @@ target_ops::fileio_open (struct inferior *inf, const char *filename,
 
 int
 target_ops::fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
-			   ULONGEST offset, int *target_errno)
+			   ULONGEST offset, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3239,21 +3197,21 @@ target_ops::fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
 
 int
 target_ops::fileio_pread (int fd, gdb_byte *read_buf, int len,
-			  ULONGEST offset, int *target_errno)
+			  ULONGEST offset, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
 }
 
 int
-target_ops::fileio_fstat (int fd, struct stat *sb, int *target_errno)
+target_ops::fileio_fstat (int fd, struct stat *sb, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
 }
 
 int
-target_ops::fileio_close (int fd, int *target_errno)
+target_ops::fileio_close (int fd, fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3261,7 +3219,7 @@ target_ops::fileio_close (int fd, int *target_errno)
 
 int
 target_ops::fileio_unlink (struct inferior *inf, const char *filename,
-			   int *target_errno)
+			   fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return -1;
@@ -3269,7 +3227,7 @@ target_ops::fileio_unlink (struct inferior *inf, const char *filename,
 
 gdb::optional<std::string>
 target_ops::fileio_readlink (struct inferior *inf, const char *filename,
-			     int *target_errno)
+			     fileio_error *target_errno)
 {
   *target_errno = FILEIO_ENOSYS;
   return {};
@@ -3279,7 +3237,7 @@ target_ops::fileio_readlink (struct inferior *inf, const char *filename,
 
 int
 target_fileio_open (struct inferior *inf, const char *filename,
-		    int flags, int mode, bool warn_if_slow, int *target_errno)
+		    int flags, int mode, bool warn_if_slow, fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3295,13 +3253,13 @@ target_fileio_open (struct inferior *inf, const char *filename,
 	fd = acquire_fileio_fd (t, fd);
 
       if (targetdebug)
-	fprintf_unfiltered (gdb_stdlog,
-				"target_fileio_open (%d,%s,0x%x,0%o,%d)"
-				" = %d (%d)\n",
-				inf == NULL ? 0 : inf->num,
-				filename, flags, mode,
-				warn_if_slow, fd,
-				fd != -1 ? 0 : *target_errno);
+	gdb_printf (gdb_stdlog,
+		    "target_fileio_open (%d,%s,0x%x,0%o,%d)"
+		    " = %d (%d)\n",
+		    inf == NULL ? 0 : inf->num,
+		    filename, flags, mode,
+		    warn_if_slow, fd,
+		    fd != -1 ? 0 : *target_errno);
       return fd;
     }
 
@@ -3313,25 +3271,25 @@ target_fileio_open (struct inferior *inf, const char *filename,
 
 int
 target_fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
-		      ULONGEST offset, int *target_errno)
+		      ULONGEST offset, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_pwrite (fh->target_fd, write_buf,
 				     len, offset, target_errno);
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog,
-			"target_fileio_pwrite (%d,...,%d,%s) "
-			"= %d (%d)\n",
-			fd, len, pulongest (offset),
-			ret, ret != -1 ? 0 : *target_errno);
+    gdb_printf (gdb_stdlog,
+		"target_fileio_pwrite (%d,...,%d,%s) "
+		"= %d (%d)\n",
+		fd, len, pulongest (offset),
+		ret, ret != -1 ? 0 : *target_errno);
   return ret;
 }
 
@@ -3339,60 +3297,60 @@ target_fileio_pwrite (int fd, const gdb_byte *write_buf, int len,
 
 int
 target_fileio_pread (int fd, gdb_byte *read_buf, int len,
-		     ULONGEST offset, int *target_errno)
+		     ULONGEST offset, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_pread (fh->target_fd, read_buf,
 				    len, offset, target_errno);
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog,
-			"target_fileio_pread (%d,...,%d,%s) "
-			"= %d (%d)\n",
-			fd, len, pulongest (offset),
-			ret, ret != -1 ? 0 : *target_errno);
+    gdb_printf (gdb_stdlog,
+		"target_fileio_pread (%d,...,%d,%s) "
+		"= %d (%d)\n",
+		fd, len, pulongest (offset),
+		ret, ret != -1 ? 0 : *target_errno);
   return ret;
 }
 
 /* See target.h.  */
 
 int
-target_fileio_fstat (int fd, struct stat *sb, int *target_errno)
+target_fileio_fstat (int fd, struct stat *sb, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else if (fh->target == NULL)
-    *target_errno = EIO;
+    *target_errno = FILEIO_EIO;
   else
     ret = fh->target->fileio_fstat (fh->target_fd, sb, target_errno);
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog,
-			"target_fileio_fstat (%d) = %d (%d)\n",
-			fd, ret, ret != -1 ? 0 : *target_errno);
+    gdb_printf (gdb_stdlog,
+		"target_fileio_fstat (%d) = %d (%d)\n",
+		fd, ret, ret != -1 ? 0 : *target_errno);
   return ret;
 }
 
 /* See target.h.  */
 
 int
-target_fileio_close (int fd, int *target_errno)
+target_fileio_close (int fd, fileio_error *target_errno)
 {
   fileio_fh_t *fh = fileio_fd_to_fh (fd);
   int ret = -1;
 
   if (fh->is_closed ())
-    *target_errno = EBADF;
+    *target_errno = FILEIO_EBADF;
   else
     {
       if (fh->target != NULL)
@@ -3404,9 +3362,9 @@ target_fileio_close (int fd, int *target_errno)
     }
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog,
-			"target_fileio_close (%d) = %d (%d)\n",
-			fd, ret, ret != -1 ? 0 : *target_errno);
+    gdb_printf (gdb_stdlog,
+		"target_fileio_close (%d) = %d (%d)\n",
+		fd, ret, ret != -1 ? 0 : *target_errno);
   return ret;
 }
 
@@ -3414,7 +3372,7 @@ target_fileio_close (int fd, int *target_errno)
 
 int
 target_fileio_unlink (struct inferior *inf, const char *filename,
-		      int *target_errno)
+		      fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3424,11 +3382,11 @@ target_fileio_unlink (struct inferior *inf, const char *filename,
 	continue;
 
       if (targetdebug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "target_fileio_unlink (%d,%s)"
-			    " = %d (%d)\n",
-			    inf == NULL ? 0 : inf->num, filename,
-			    ret, ret != -1 ? 0 : *target_errno);
+	gdb_printf (gdb_stdlog,
+		    "target_fileio_unlink (%d,%s)"
+		    " = %d (%d)\n",
+		    inf == NULL ? 0 : inf->num, filename,
+		    ret, ret != -1 ? 0 : *target_errno);
       return ret;
     }
 
@@ -3440,7 +3398,7 @@ target_fileio_unlink (struct inferior *inf, const char *filename,
 
 gdb::optional<std::string>
 target_fileio_readlink (struct inferior *inf, const char *filename,
-			int *target_errno)
+			fileio_error *target_errno)
 {
   for (target_ops *t = default_fileio_target (); t != NULL; t = t->beneath ())
     {
@@ -3451,12 +3409,12 @@ target_fileio_readlink (struct inferior *inf, const char *filename,
 	continue;
 
       if (targetdebug)
-	fprintf_unfiltered (gdb_stdlog,
-			    "target_fileio_readlink (%d,%s)"
-			    " = %s (%d)\n",
-			    inf == NULL ? 0 : inf->num,
-			    filename, ret ? ret->c_str () : "(nil)",
-			    ret ? 0 : *target_errno);
+	gdb_printf (gdb_stdlog,
+		    "target_fileio_readlink (%d,%s)"
+		    " = %s (%d)\n",
+		    inf == NULL ? 0 : inf->num,
+		    filename, ret ? ret->c_str () : "(nil)",
+		    ret ? 0 : *target_errno);
       return ret;
     }
 
@@ -3478,7 +3436,7 @@ public:
   {
     if (m_fd >= 0)
       {
-	int target_errno;
+	fileio_error target_errno;
 
 	target_fileio_close (m_fd, &target_errno);
       }
@@ -3510,7 +3468,7 @@ target_fileio_read_alloc_1 (struct inferior *inf, const char *filename,
   size_t buf_alloc, buf_pos;
   gdb_byte *buf;
   LONGEST n;
-  int target_errno;
+  fileio_error target_errno;
 
   scoped_target_fd fd (target_fileio_open (inf, filename, FILEIO_O_RDONLY,
 					   0700, false, &target_errno));
@@ -3621,8 +3579,8 @@ target_stack::find_beneath (const target_ops *t) const
 {
   /* Look for a non-empty slot at stratum levels beneath T's.  */
   for (int stratum = t->stratum () - 1; stratum >= 0; --stratum)
-    if (m_stack[stratum] != NULL)
-      return m_stack[stratum];
+    if (m_stack[stratum].get () != NULL)
+      return m_stack[stratum].get ();
 
   return NULL;
 }
@@ -3651,11 +3609,11 @@ target_announce_detach (int from_tty)
   pid = inferior_ptid.pid ();
   exec_file = get_exec_file (0);
   if (exec_file == nullptr)
-    printf_unfiltered ("Detaching from pid %s\n",
-		       target_pid_to_str (ptid_t (pid)).c_str ());
+    gdb_printf ("Detaching from pid %s\n",
+		target_pid_to_str (ptid_t (pid)).c_str ());
   else
-    printf_unfiltered (_("Detaching from program: %s, %s\n"), exec_file,
-		       target_pid_to_str (ptid_t (pid)).c_str ());
+    gdb_printf (_("Detaching from program: %s, %s\n"), exec_file,
+		target_pid_to_str (ptid_t (pid)).c_str ());
 }
 
 /* See target.h  */
@@ -3669,11 +3627,11 @@ target_announce_attach (int from_tty, int pid)
   const char *exec_file = get_exec_file (0);
 
   if (exec_file != nullptr)
-    printf_unfiltered ("Attaching to program: %s, %s\n", exec_file,
-		       target_pid_to_str (ptid_t (pid)).c_str ());
+    gdb_printf ("Attaching to program: %s, %s\n", exec_file,
+		target_pid_to_str (ptid_t (pid)).c_str ());
   else
-    printf_unfiltered ("Attaching to %s\n",
-		       target_pid_to_str (ptid_t (pid)).c_str ());
+    gdb_printf ("Attaching to %s\n",
+		target_pid_to_str (ptid_t (pid)).c_str ());
 }
 
 /* The inferior process has died.  Long live the inferior!  */
@@ -3798,7 +3756,7 @@ target_close (struct target_ops *targ)
   targ->close ();
 
   if (targetdebug)
-    fprintf_unfiltered (gdb_stdlog, "target_close ()\n");
+    gdb_printf (gdb_stdlog, "target_close ()\n");
 }
 
 int
@@ -4354,7 +4312,7 @@ flash_erase_command (const char *cmd, int from_tty)
 static void
 maintenance_print_target_stack (const char *cmd, int from_tty)
 {
-  printf_filtered (_("The current target stack is:\n"));
+  gdb_printf (_("The current target stack is:\n"));
 
   for (target_ops *t = current_inferior ()->top_target ();
        t != NULL;
@@ -4362,14 +4320,14 @@ maintenance_print_target_stack (const char *cmd, int from_tty)
     {
       if (t->stratum () == debug_stratum)
 	continue;
-      printf_filtered ("  - %s (%s)\n", t->shortname (), t->longname ());
+      gdb_printf ("  - %s (%s)\n", t->shortname (), t->longname ());
     }
 }
 
 /* See target.h.  */
 
 void
-target_async (int enable)
+target_async (bool enable)
 {
   /* If we are trying to enable async mode then it must be the case that
      async mode is possible for this target.  */
@@ -4409,9 +4367,9 @@ static void
 show_maint_target_async (ui_file *file, int from_tty,
 			 cmd_list_element *c, const char *value)
 {
-  fprintf_filtered (file,
-		    _("Controlling the inferior in "
-		      "asynchronous mode is %s.\n"), value);
+  gdb_printf (file,
+	      _("Controlling the inferior in "
+		"asynchronous mode is %s.\n"), value);
 }
 
 /* Return true if the target operates in non-stop mode even with "set
@@ -4483,14 +4441,14 @@ show_maint_target_non_stop (ui_file *file, int from_tty,
 			    cmd_list_element *c, const char *value)
 {
   if (target_non_stop_enabled == AUTO_BOOLEAN_AUTO)
-    fprintf_filtered (file,
-		      _("Whether the target is always in non-stop mode "
-			"is %s (currently %s).\n"), value,
-		      target_always_non_stop_p () ? "on" : "off");
+    gdb_printf (file,
+		_("Whether the target is always in non-stop mode "
+		  "is %s (currently %s).\n"), value,
+		target_always_non_stop_p () ? "on" : "off");
   else
-    fprintf_filtered (file,
-		      _("Whether the target is always in non-stop mode "
-			"is %s.\n"), value);
+    gdb_printf (file,
+		_("Whether the target is always in non-stop mode "
+		  "is %s.\n"), value);
 }
 
 /* Temporary copies of permission settings.  */

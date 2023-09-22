@@ -323,11 +323,11 @@ elf_swap_shdr_in (bfd *abfd,
 
       if (filesize != 0
 	  && ((ufile_ptr) dst->sh_offset > filesize
-	      || dst->sh_size > filesize - dst->sh_offset))
+	      || dst->sh_size > filesize - dst->sh_offset)
+	  && !abfd->read_only)
 	{
-	  if (!abfd->read_only)
-	    _bfd_error_handler (_("warning: %pB has a section "
-				  "extending past end of file"), abfd);
+	  _bfd_error_handler (_("warning: %pB has a section "
+				"extending past end of file"), abfd);
 	  abfd->read_only = 1;
 	}
     }
@@ -771,10 +771,12 @@ elf_object_p (bfd *abfd)
 	     So we are kind, and reset the string index value to 0
 	     so that at least some processing can be done.  */
 	  i_ehdrp->e_shstrndx = SHN_UNDEF;
-	  abfd->read_only = 1;
-	  _bfd_error_handler
-	    (_("warning: %pB has a corrupt string table index - ignoring"),
-	     abfd);
+	  if (!abfd->read_only)
+	    {
+	      _bfd_error_handler
+		(_("warning: %pB has a corrupt string table index"), abfd);
+	      abfd->read_only = 1;
+	    }
 	}
     }
   else if (i_ehdrp->e_shstrndx != SHN_UNDEF)
@@ -816,9 +818,13 @@ elf_object_p (bfd *abfd)
 	     two, as required by the ELF spec.  */
 	  if (i_phdr->p_align != (i_phdr->p_align & -i_phdr->p_align))
 	    {
-	      abfd->read_only = 1;
-	      _bfd_error_handler (_("warning: %pB has a program header "
-				    "with invalid alignment"), abfd);
+	      i_phdr->p_align &= -i_phdr->p_align;
+	      if (!abfd->read_only)
+		{
+		  _bfd_error_handler (_("warning: %pB has a program header "
+					"with invalid alignment"), abfd);
+		  abfd->read_only = 1;
+		}
 	    }
 	}
     }
@@ -996,6 +1002,20 @@ elf_write_relocs (bfd *abfd, asection *sec, void *data)
 	  *failedp = true;
 	  return;
 	}
+
+#if defined(BFD64) && ARCH_SIZE == 32
+      if (rela_hdr->sh_type == SHT_RELA
+	  && ptr->howto->bitsize > 32
+	  && ptr->addend - INT32_MIN > UINT32_MAX)
+	{
+	  _bfd_error_handler (_("%pB: %pA+%" PRIx64 ": "
+				"relocation addend %" PRIx64 " too large"),
+			      abfd, sec, (uint64_t) ptr->address,
+			      (uint64_t) ptr->addend);
+	  *failedp = true;
+	  bfd_set_error (bfd_error_bad_value);
+	}
+#endif
 
       src_rela.r_offset = ptr->address + addr_offset;
       src_rela.r_info = ELF_R_INFO (n, ptr->howto->type);

@@ -1,6 +1,6 @@
 /* MI Interpreter Definitions and Commands for GDB, the GNU debugger.
 
-   Copyright (C) 2002-2022 Free Software Foundation, Inc.
+   Copyright (C) 2002-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -98,7 +98,7 @@ display_mi_prompt (struct mi_interp *mi)
 {
   struct ui *ui = current_ui;
 
-  fputs_unfiltered ("(gdb) \n", mi->raw_stdout);
+  gdb_puts ("(gdb) \n", mi->raw_stdout);
   gdb_flush (mi->raw_stdout);
   ui->prompt_state = PROMPTED;
 }
@@ -141,7 +141,7 @@ mi_interp::init (bool top_level)
   mi->event_channel = new mi_console_file (mi->raw_stdout, "=", 0);
   mi->mi_uiout = mi_out_new (name ());
   gdb_assert (mi->mi_uiout != nullptr);
-  mi->cli_uiout = cli_out_new (mi->out);
+  mi->cli_uiout = new cli_ui_out (mi->out);
 
   if (top_level)
     {
@@ -159,9 +159,9 @@ mi_interp::init (bool top_level)
 	  target_terminal::scoped_restore_terminal_state term_state;
 	  target_terminal::ours_for_output ();
 
-	  fprintf_unfiltered (mi->event_channel,
-			      "thread-group-added,id=\"i%d\"",
-			      inf->num);
+	  gdb_printf (mi->event_channel,
+		      "thread-group-added,id=\"i%d\"",
+		      inf->num);
 
 	  gdb_flush (mi->event_channel);
 	}
@@ -189,10 +189,6 @@ mi_interp::resume ()
   gdb_stdtarg = mi->targ;
   /* Route target error through the MI as well.  */
   gdb_stdtargerr = mi->targ;
-
-  /* Replace all the hooks that we know about.  There really needs to
-     be a better way of doing this... */
-  clear_interpreter_hooks ();
 
   deprecated_show_load_progress = mi_load_progress;
 }
@@ -348,9 +344,9 @@ mi_new_thread (struct thread_info *t)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "thread-created,id=\"%d\",group-id=\"i%d\"",
-			  t->global_num, t->inf->num);
+      gdb_printf (mi->event_channel,
+		  "thread-created,id=\"%d\",group-id=\"i%d\"",
+		  t->global_num, t->inf->num);
       gdb_flush (mi->event_channel);
     }
 }
@@ -358,9 +354,6 @@ mi_new_thread (struct thread_info *t)
 static void
 mi_thread_exit (struct thread_info *t, int silent)
 {
-  if (silent)
-    return;
-
   SWITCH_THRU_ALL_UIS ()
     {
       struct mi_interp *mi = as_mi_interp (top_level_interpreter ());
@@ -370,9 +363,9 @@ mi_thread_exit (struct thread_info *t, int silent)
 
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
-      fprintf_unfiltered (mi->event_channel,
-			  "thread-exited,id=\"%d\",group-id=\"i%d\"",
-			  t->global_num, t->inf->num);
+      gdb_printf (mi->event_channel,
+		  "thread-exited,id=\"%d\",group-id=\"i%d\"",
+		  t->global_num, t->inf->num);
       gdb_flush (mi->event_channel);
     }
 }
@@ -397,24 +390,24 @@ mi_record_changed (struct inferior *inferior, int started, const char *method,
 	{
 	  if (format != NULL)
 	    {
-	      fprintf_unfiltered (mi->event_channel,
-				  "record-started,thread-group=\"i%d\","
-				  "method=\"%s\",format=\"%s\"",
-				  inferior->num, method, format);
+	      gdb_printf (mi->event_channel,
+			  "record-started,thread-group=\"i%d\","
+			  "method=\"%s\",format=\"%s\"",
+			  inferior->num, method, format);
 	    }
 	  else
 	    {
-	      fprintf_unfiltered (mi->event_channel,
-				  "record-started,thread-group=\"i%d\","
-				  "method=\"%s\"",
-				  inferior->num, method);
+	      gdb_printf (mi->event_channel,
+			  "record-started,thread-group=\"i%d\","
+			  "method=\"%s\"",
+			  inferior->num, method);
 	    }
 	}
       else
 	{
-	  fprintf_unfiltered (mi->event_channel,
-			      "record-stopped,thread-group=\"i%d\"",
-			      inferior->num);
+	  gdb_printf (mi->event_channel,
+		      "record-stopped,thread-group=\"i%d\"",
+		      inferior->num);
 	}
 
       gdb_flush (mi->event_channel);
@@ -442,9 +435,9 @@ mi_inferior_added (struct inferior *inf)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "thread-group-added,id=\"i%d\"",
-			  inf->num);
+      gdb_printf (mi->event_channel,
+		  "thread-group-added,id=\"i%d\"",
+		  inf->num);
       gdb_flush (mi->event_channel);
     }
 }
@@ -462,9 +455,9 @@ mi_inferior_appeared (struct inferior *inf)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "thread-group-started,id=\"i%d\",pid=\"%d\"",
-			  inf->num, inf->pid);
+      gdb_printf (mi->event_channel,
+		  "thread-group-started,id=\"i%d\",pid=\"%d\"",
+		  inf->num, inf->pid);
       gdb_flush (mi->event_channel);
     }
 }
@@ -483,12 +476,12 @@ mi_inferior_exit (struct inferior *inf)
       target_terminal::ours_for_output ();
 
       if (inf->has_exit_code)
-	fprintf_unfiltered (mi->event_channel,
-			    "thread-group-exited,id=\"i%d\",exit-code=\"%s\"",
-			    inf->num, int_string (inf->exit_code, 8, 0, 0, 1));
+	gdb_printf (mi->event_channel,
+		    "thread-group-exited,id=\"i%d\",exit-code=\"%s\"",
+		    inf->num, int_string (inf->exit_code, 8, 0, 0, 1));
       else
-	fprintf_unfiltered (mi->event_channel,
-			    "thread-group-exited,id=\"i%d\"", inf->num);
+	gdb_printf (mi->event_channel,
+		    "thread-group-exited,id=\"i%d\"", inf->num);
 
       gdb_flush (mi->event_channel);
     }
@@ -507,9 +500,9 @@ mi_inferior_removed (struct inferior *inf)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "thread-group-removed,id=\"i%d\"",
-			  inf->num);
+      gdb_printf (mi->event_channel,
+		  "thread-group-removed,id=\"i%d\"",
+		  inf->num);
       gdb_flush (mi->event_channel);
     }
 }
@@ -674,11 +667,11 @@ mi_on_normal_stop_1 (struct bpstat *bs, int print_frame)
 	mi_uiout->field_signed ("core", core);
     }
   
-  fputs_unfiltered ("*stopped", mi->raw_stdout);
+  gdb_puts ("*stopped", mi->raw_stdout);
   mi_out_put (mi_uiout, mi->raw_stdout);
   mi_out_rewind (mi_uiout);
   mi_print_timing_maybe (mi->raw_stdout);
-  fputs_unfiltered ("\n", mi->raw_stdout);
+  gdb_puts ("\n", mi->raw_stdout);
   gdb_flush (mi->raw_stdout);
 }
 
@@ -740,11 +733,11 @@ mi_traceframe_changed (int tfnum, int tpnum)
       target_terminal::ours_for_output ();
 
       if (tfnum >= 0)
-	fprintf_unfiltered (mi->event_channel, "traceframe-changed,"
-			    "num=\"%d\",tracepoint=\"%d\"",
-			    tfnum, tpnum);
+	gdb_printf (mi->event_channel, "traceframe-changed,"
+		    "num=\"%d\",tracepoint=\"%d\"",
+		    tfnum, tpnum);
       else
-	fprintf_unfiltered (mi->event_channel, "traceframe-changed,end");
+	gdb_printf (mi->event_channel, "traceframe-changed,end");
 
       gdb_flush (mi->event_channel);
     }
@@ -765,9 +758,9 @@ mi_tsv_created (const struct trace_state_variable *tsv)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "tsv-created,"
-			  "name=\"%s\",initial=\"%s\"",
-			  tsv->name.c_str (), plongest (tsv->initial_value));
+      gdb_printf (mi->event_channel, "tsv-created,"
+		  "name=\"%s\",initial=\"%s\"",
+		  tsv->name.c_str (), plongest (tsv->initial_value));
 
       gdb_flush (mi->event_channel);
     }
@@ -789,10 +782,10 @@ mi_tsv_deleted (const struct trace_state_variable *tsv)
       target_terminal::ours_for_output ();
 
       if (tsv != NULL)
-	fprintf_unfiltered (mi->event_channel, "tsv-deleted,"
-			    "name=\"%s\"", tsv->name.c_str ());
+	gdb_printf (mi->event_channel, "tsv-deleted,"
+		    "name=\"%s\"", tsv->name.c_str ());
       else
-	fprintf_unfiltered (mi->event_channel, "tsv-deleted");
+	gdb_printf (mi->event_channel, "tsv-deleted");
 
       gdb_flush (mi->event_channel);
     }
@@ -816,18 +809,16 @@ mi_tsv_modified (const struct trace_state_variable *tsv)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "tsv-modified");
+      gdb_printf (mi->event_channel,
+		  "tsv-modified");
 
-      mi_uiout->redirect (mi->event_channel);
+      ui_out_redirect_pop redir (mi_uiout, mi->event_channel);
 
       mi_uiout->field_string ("name", tsv->name);
       mi_uiout->field_string ("initial",
-			   plongest (tsv->initial_value));
+			      plongest (tsv->initial_value));
       if (tsv->value_known)
 	mi_uiout->field_string ("current", plongest (tsv->value));
-
-      mi_uiout->redirect (NULL);
 
       gdb_flush (mi->event_channel);
     }
@@ -847,7 +838,7 @@ mi_print_breakpoint_for_event (struct mi_interp *mi, breakpoint *bp)
      break if anything is output to mi_uiout prior to calling the
      breakpoint_created notifications.  So, we use
      ui_out_redirect.  */
-  mi_uiout->redirect (mi->event_channel);
+  ui_out_redirect_pop redir (mi_uiout, mi->event_channel);
 
   try
     {
@@ -860,8 +851,6 @@ mi_print_breakpoint_for_event (struct mi_interp *mi, breakpoint *bp)
     {
       exception_print (gdb_stderr, ex);
     }
-
-  mi_uiout->redirect (NULL);
 }
 
 /* Emit notification about a created breakpoint.  */
@@ -885,8 +874,8 @@ mi_breakpoint_created (struct breakpoint *b)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel,
-			  "breakpoint-created");
+      gdb_printf (mi->event_channel,
+		  "breakpoint-created");
       mi_print_breakpoint_for_event (mi, b);
 
       gdb_flush (mi->event_channel);
@@ -914,8 +903,8 @@ mi_breakpoint_deleted (struct breakpoint *b)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "breakpoint-deleted,id=\"%d\"",
-			  b->number);
+      gdb_printf (mi->event_channel, "breakpoint-deleted,id=\"%d\"",
+		  b->number);
 
       gdb_flush (mi->event_channel);
     }
@@ -941,8 +930,8 @@ mi_breakpoint_modified (struct breakpoint *b)
 
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
-      fprintf_unfiltered (mi->event_channel,
-			  "breakpoint-modified");
+      gdb_printf (mi->event_channel,
+		  "breakpoint-modified");
       mi_print_breakpoint_for_event (mi, b);
 
       gdb_flush (mi->event_channel);
@@ -959,9 +948,9 @@ mi_output_running (struct thread_info *thread)
       if (mi == NULL)
 	continue;
 
-      fprintf_unfiltered (mi->raw_stdout,
-			  "*running,thread-id=\"%d\"\n",
-			  thread->global_num);
+      gdb_printf (mi->raw_stdout,
+		  "*running,thread-id=\"%d\"\n",
+		  thread->global_num);
     }
 }
 
@@ -997,8 +986,8 @@ mi_on_resume_1 (struct mi_interp *mi,
      In future (MI3), we'll be outputting "^done" here.  */
   if (!running_result_record_printed && mi_proceeded)
     {
-      fprintf_unfiltered (mi->raw_stdout, "%s^running\n",
-			  current_token ? current_token : "");
+      gdb_printf (mi->raw_stdout, "%s^running\n",
+		  current_token ? current_token : "");
     }
 
   /* Backwards compatibility.  If doing a wildcard resume and there's
@@ -1006,7 +995,7 @@ mi_on_resume_1 (struct mi_interp *mi,
      thread individually.  */
   if ((ptid == minus_one_ptid || ptid.is_pid ())
       && !multiple_inferiors_p ())
-    fprintf_unfiltered (mi->raw_stdout, "*running,thread-id=\"all\"\n");
+    gdb_printf (mi->raw_stdout, "*running,thread-id=\"all\"\n");
   else
     for (thread_info *tp : all_non_exited_threads (targ, ptid))
       mi_output_running (tp);
@@ -1018,7 +1007,7 @@ mi_on_resume_1 (struct mi_interp *mi,
 	 even if it cannot actually accept any input.  This will be
 	 surely removed for MI3, and may be removed even earlier.  */
       if (current_ui->prompt_state == PROMPT_BLOCKED)
-	fputs_unfiltered ("(gdb) \n", mi->raw_stdout);
+	gdb_puts ("(gdb) \n", mi->raw_stdout);
     }
   gdb_flush (mi->raw_stdout);
 }
@@ -1091,13 +1080,11 @@ mi_solib_loaded (struct so_list *solib)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "library-loaded");
+      gdb_printf (mi->event_channel, "library-loaded");
 
-      uiout->redirect (mi->event_channel);
+      ui_out_redirect_pop redir (uiout, mi->event_channel);
 
       mi_output_solib_attribs (uiout, solib);
-
-      uiout->redirect (NULL);
 
       gdb_flush (mi->event_channel);
     }
@@ -1119,9 +1106,9 @@ mi_solib_unloaded (struct so_list *solib)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "library-unloaded");
+      gdb_printf (mi->event_channel, "library-unloaded");
 
-      uiout->redirect (mi->event_channel);
+      ui_out_redirect_pop redir (uiout, mi->event_channel);
 
       uiout->field_string ("id", solib->so_original_name);
       uiout->field_string ("target-name", solib->so_original_name);
@@ -1130,8 +1117,6 @@ mi_solib_unloaded (struct so_list *solib)
 	{
 	  uiout->field_fmt ("thread-group", "i%d", current_inferior ()->num);
 	}
-
-      uiout->redirect (NULL);
 
       gdb_flush (mi->event_channel);
     }
@@ -1158,14 +1143,12 @@ mi_command_param_changed (const char *param, const char *value)
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "cmd-param-changed");
+      gdb_printf (mi->event_channel, "cmd-param-changed");
 
-      mi_uiout->redirect (mi->event_channel);
+      ui_out_redirect_pop redir (mi_uiout, mi->event_channel);
 
       mi_uiout->field_string ("param", param);
       mi_uiout->field_string ("value", value);
-
-      mi_uiout->redirect (NULL);
 
       gdb_flush (mi->event_channel);
     }
@@ -1194,9 +1177,9 @@ mi_memory_changed (struct inferior *inferior, CORE_ADDR memaddr,
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
 
-      fprintf_unfiltered (mi->event_channel, "memory-changed");
+      gdb_printf (mi->event_channel, "memory-changed");
 
-      mi_uiout->redirect (mi->event_channel);
+      ui_out_redirect_pop redir (mi_uiout, mi->event_channel);
 
       mi_uiout->field_fmt ("thread-group", "i%d", inferior->num);
       mi_uiout->field_core_addr ("addr", target_gdbarch (), memaddr);
@@ -1212,8 +1195,6 @@ mi_memory_changed (struct inferior *inferior, CORE_ADDR memaddr,
 	  if (flags & SEC_CODE)
 	    mi_uiout->field_string ("type", "code");
 	}
-
-      mi_uiout->redirect (NULL);
 
       gdb_flush (mi->event_channel);
     }
@@ -1246,8 +1227,7 @@ mi_user_selected_context_changed (user_selected_what selection)
 
       mi_uiout = top_level_interpreter ()->interp_ui_out ();
 
-      mi_uiout->redirect (mi->event_channel);
-      ui_out_redirect_pop redirect_popper (mi_uiout);
+      ui_out_redirect_pop redirect_popper (mi_uiout, mi->event_channel);
 
       target_terminal::scoped_restore_terminal_state term_state;
       target_terminal::ours_for_output ();
@@ -1260,9 +1240,9 @@ mi_user_selected_context_changed (user_selected_what selection)
 	{
 	  print_selected_thread_frame (mi->cli_uiout, selection);
 
-	  fprintf_unfiltered (mi->event_channel,
-			      "thread-selected,id=\"%d\"",
-			      tp->global_num);
+	  gdb_printf (mi->event_channel,
+		      "thread-selected,id=\"%d\"",
+		      tp->global_num);
 
 	  if (tp->state != THREAD_RUNNING)
 	    {
@@ -1295,32 +1275,26 @@ mi_interp::set_logging (ui_file_up logfile, bool logging_redirect,
     {
       mi->saved_raw_stdout = mi->raw_stdout;
 
-      /* If something is being redirected, then grab logfile.  */
-      ui_file *logfile_p = nullptr;
-      if (logging_redirect || debug_redirect)
-	{
-	  logfile_p = logfile.get ();
-	  mi->saved_raw_file_to_delete = logfile_p;
-	}
+      ui_file *logfile_p = logfile.get ();
+      mi->logfile_holder = std::move (logfile);
 
       /* If something is not being redirected, then a tee containing both the
 	 logfile and stdout.  */
       ui_file *tee = nullptr;
       if (!logging_redirect || !debug_redirect)
 	{
-	  tee = new tee_file (mi->raw_stdout, std::move (logfile));
-	  mi->saved_raw_file_to_delete = tee;
+	  tee = new tee_file (mi->raw_stdout, logfile_p);
+	  mi->stdout_holder.reset (tee);
 	}
 
       mi->raw_stdout = logging_redirect ? logfile_p : tee;
-      mi->raw_stdlog = debug_redirect ? logfile_p : tee;
     }
   else
     {
-      delete mi->saved_raw_file_to_delete;
+      mi->logfile_holder.reset ();
+      mi->stdout_holder.reset ();
       mi->raw_stdout = mi->saved_raw_stdout;
       mi->saved_raw_stdout = nullptr;
-      mi->saved_raw_file_to_delete = nullptr;
     }
 
   mi->out->set_raw (mi->raw_stdout);
@@ -1346,6 +1320,7 @@ _initialize_mi_interp ()
   interp_factory_register (INTERP_MI1, mi_interp_factory);
   interp_factory_register (INTERP_MI2, mi_interp_factory);
   interp_factory_register (INTERP_MI3, mi_interp_factory);
+  interp_factory_register (INTERP_MI4, mi_interp_factory);
   interp_factory_register (INTERP_MI, mi_interp_factory);
 
   gdb::observers::signal_received.attach (mi_on_signal_received, "mi-interp");

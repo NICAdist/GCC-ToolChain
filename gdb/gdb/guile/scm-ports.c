@@ -1,7 +1,7 @@
 /* Support for connecting Guile's stdio to GDB's.
    as well as r/w memory via ports.
 
-   Copyright (C) 2014-2022 Free Software Foundation, Inc.
+   Copyright (C) 2014-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -202,9 +202,9 @@ fputsn_filtered (const char *s, size_t size, struct ui_file *stream)
   for (i = 0; i < size; ++i)
     {
       if (s[i] == '\0')
-	fputs_filtered ("\\000", stream);
+	gdb_puts ("\\000", stream);
       else
-	fputc_filtered (s[i], stream);
+	gdb_putc (s[i], stream);
     }
 }
 
@@ -607,8 +607,7 @@ ioscm_with_output_to_port_worker (SCM port, SCM thunk, enum oport oport,
       gdb_stderr = port_file.get ();
     else
       {
-	current_uiout->redirect (port_file.get ());
-	redirect_popper.emplace (current_uiout);
+	redirect_popper.emplace (current_uiout, port_file.get ());
 
 	gdb_stdout = port_file.get ();
       }

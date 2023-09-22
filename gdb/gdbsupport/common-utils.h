@@ -1,6 +1,6 @@
 /* Shared general utility routines for GDB, the GNU debugger.
 
-   Copyright (C) 1986-2022 Free Software Foundation, Inc.
+   Copyright (C) 1986-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -91,6 +91,22 @@ startswith (gdb::string_view string, gdb::string_view pattern)
 {
   return (string.length () >= pattern.length ()
 	  && strncmp (string.data (), pattern.data (), pattern.length ()) == 0);
+}
+
+/* Return true if the strings are equal.  */
+
+static inline bool
+streq (const char *lhs, const char *rhs)
+{
+  return strcmp (lhs, rhs) == 0;
+}
+
+/* Compare C strings for std::sort.  */
+
+static inline bool
+compare_cstrings (const char *str1, const char *str2)
+{
+  return strcmp (str1, str2) < 0;
 }
 
 ULONGEST strtoulst (const char *num, const char **trailer, int base);

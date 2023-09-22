@@ -6,8 +6,8 @@ Also autoconf-archive has been removed (moved to the project autotools since it 
 | Package | Version |
 |---|---|
 |binutils|v2.41|
-|gcc|v12.3.0|
-|gdb|v12.1|
+|gcc|v13.2.0|
+|gdb|v13.2|
 |gmp|6.3.0|
 |isl|0.24|
 |mpfr|4.2.1|

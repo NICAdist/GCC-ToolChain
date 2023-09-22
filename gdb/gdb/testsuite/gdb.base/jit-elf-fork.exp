@@ -1,4 +1,4 @@
-# Copyright 2011-2022 Free Software Foundation, Inc.
+# Copyright 2011-2023 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,11 +18,6 @@
 if {[skip_shlib_tests]} {
     untested "skipping shared library tests"
     return -1
-}
-
-if {[get_compiler_info]} {
-    untested "could not get compiler info"
-    return 1
 }
 
 load_lib jit-elf-helpers.exp

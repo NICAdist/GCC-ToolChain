@@ -1,6 +1,6 @@
 /* Compact ANSI-C Type Format (CTF) support in GDB.
 
-   Copyright (C) 2019-2022 Free Software Foundation, Inc.
+   Copyright (C) 2019-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -87,7 +87,7 @@
 #include "ctf.h"
 #include "ctf-api.h"
 
-static const struct objfile_key<htab, htab_deleter> ctf_tid_key;
+static const registry<objfile>::key<htab, htab_deleter> ctf_tid_key;
 
 struct ctf_fp_info
 {
@@ -107,7 +107,7 @@ ctf_fp_info::~ctf_fp_info ()
   ctf_close (arc);
 }
 
-static const objfile_key<ctf_fp_info> ctf_dict_key;
+static const registry<objfile>::key<ctf_fp_info> ctf_dict_key;
 
 /* A CTF context consists of a file pointer and an objfile pointer.  */
 
@@ -243,7 +243,7 @@ set_tid_type (struct objfile *of, ctf_id_t tid, struct type *typ)
 {
   htab_t htab;
 
-  htab = (htab_t) ctf_tid_key.get (of);
+  htab = ctf_tid_key.get (of);
   if (htab == NULL)
     {
       htab = htab_create_alloc (1, tid_and_type_hash,
@@ -271,7 +271,7 @@ get_tid_type (struct objfile *of, ctf_id_t tid)
   struct ctf_tid_and_type *slot, ids;
   htab_t htab;
 
-  htab = (htab_t) ctf_tid_key.get (of);
+  htab = ctf_tid_key.get (of);
   if (htab == NULL)
     return nullptr;
 
@@ -329,7 +329,7 @@ set_symbol_address (struct objfile *of, struct symbol *sym, const char *name)
   msym = lookup_minimal_symbol (name, nullptr, of);
   if (msym.minsym != NULL)
     {
-      SET_SYMBOL_VALUE_ADDRESS (sym, BMSYMBOL_VALUE_ADDRESS (msym));
+      sym->set_value_address (msym.value_address ());
       sym->set_aclass_index (LOC_STATIC);
       sym->set_section_index (msym.minsym->section_index ());
     }
@@ -641,7 +641,7 @@ read_structure_type (struct ctf_context *ccp, ctf_id_t tid)
   else
     type->set_code (TYPE_CODE_STRUCT);
 
-  TYPE_LENGTH (type) = ctf_type_size (fp, tid);
+  type->set_length (ctf_type_size (fp, tid));
   set_type_align (type, ctf_type_align (fp, tid));
 
   return set_tid_type (ccp->of, tid, type);
@@ -698,7 +698,7 @@ read_func_kind_type (struct ctf_context *ccp, ctf_id_t tid)
 	     fname == nullptr ? "noname" : fname);
     }
   rettype = fetch_tid_type (ccp, cfi.ctc_return);
-  TYPE_TARGET_TYPE (type) = rettype;
+  type->set_target_type (rettype);
   set_type_align (type, ctf_type_align (fp, tid));
 
   /* Set up function's arguments.  */
@@ -747,9 +747,9 @@ read_enum_type (struct ctf_context *ccp, ctf_id_t tid)
     type->set_name (name);
 
   type->set_code (TYPE_CODE_ENUM);
-  TYPE_LENGTH (type) = ctf_type_size (fp, tid);
+  type->set_length (ctf_type_size (fp, tid));
   /* Set the underlying type based on its ctf_type_size bits.  */
-  TYPE_TARGET_TYPE (type) = objfile_int_type (of, TYPE_LENGTH (type), false);
+  type->set_target_type (objfile_int_type (of, type->length (), false));
   set_type_align (type, ctf_type_align (fp, tid));
 
   return set_tid_type (of, tid, type);
@@ -789,17 +789,16 @@ add_array_cv_type (struct ctf_context *ccp,
   base_type = copy_type (base_type);
   inner_array = base_type;
 
-  while (TYPE_TARGET_TYPE (inner_array)->code () == TYPE_CODE_ARRAY)
+  while (inner_array->target_type ()->code () == TYPE_CODE_ARRAY)
     {
-      TYPE_TARGET_TYPE (inner_array)
-	= copy_type (TYPE_TARGET_TYPE (inner_array));
-      inner_array = TYPE_TARGET_TYPE (inner_array);
+      inner_array->set_target_type (copy_type (inner_array->target_type ()));
+      inner_array = inner_array->target_type ();
     }
 
-  el_type = TYPE_TARGET_TYPE (inner_array);
+  el_type = inner_array->target_type ();
   cnst |= TYPE_CONST (el_type);
   voltl |= TYPE_VOLATILE (el_type);
-  TYPE_TARGET_TYPE (inner_array) = make_cv_type (cnst, voltl, el_type, nullptr);
+  inner_array->set_target_type (make_cv_type (cnst, voltl, el_type, nullptr));
 
   return set_tid_type (ccp->of, tid, base_type);
 }
@@ -835,11 +834,11 @@ read_array_type (struct ctf_context *ccp, ctf_id_t tid)
   if (ar.ctr_nelems <= 1)	/* Check if undefined upper bound.  */
     {
       range_type->bounds ()->high.set_undefined ();
-      TYPE_LENGTH (type) = 0;
+      type->set_length (0);
       type->set_target_is_stub (true);
     }
   else
-    TYPE_LENGTH (type) = ctf_type_size (fp, tid);
+    type->set_length (ctf_type_size (fp, tid));
 
   set_type_align (type, ctf_type_align (fp, tid));
 
@@ -933,11 +932,11 @@ read_typedef_type (struct ctf_context *ccp, ctf_id_t tid,
   set_tid_type (objfile, tid, this_type);
   target_type = fetch_tid_type (ccp, btid);
   if (target_type != this_type)
-    TYPE_TARGET_TYPE (this_type) = target_type;
+    this_type->set_target_type (target_type);
   else
-    TYPE_TARGET_TYPE (this_type) = nullptr;
+    this_type->set_target_type (nullptr);
 
-  this_type->set_target_is_stub (TYPE_TARGET_TYPE (this_type) != nullptr);
+  this_type->set_target_is_stub (this_type->target_type () != nullptr);
 
   return set_tid_type (objfile, tid, this_type);
 }
@@ -989,7 +988,7 @@ read_forward_type (struct ctf_context *ccp, ctf_id_t tid)
   else
     type->set_code (TYPE_CODE_STRUCT);
 
-  TYPE_LENGTH (type) = 0;
+  type->set_length (0);
   type->set_is_stub (true);
 
   return set_tid_type (of, tid, type);
@@ -1235,7 +1234,7 @@ add_stt_func (struct ctf_context *ccp)
 static CORE_ADDR
 get_objfile_text_range (struct objfile *of, int *tsize)
 {
-  bfd *abfd = of->obfd;
+  bfd *abfd = of->obfd.get ();
   const asection *codes;
 
   codes = bfd_get_section_by_name (abfd, ".text");
@@ -1246,14 +1245,14 @@ get_objfile_text_range (struct objfile *of, int *tsize)
 /* Start a symtab for OBJFILE in CTF format.  */
 
 static void
-ctf_start_symtab (ctf_psymtab *pst,
-		  struct objfile *of, CORE_ADDR text_offset)
+ctf_start_compunit_symtab (ctf_psymtab *pst,
+			   struct objfile *of, CORE_ADDR text_offset)
 {
   struct ctf_context *ccp;
 
   ccp = &pst->context;
   ccp->builder = new buildsym_compunit
-		       (of, of->original_name, nullptr,
+		       (of, pst->filename, nullptr,
 		       language_c, text_offset);
   ccp->builder->record_debugformat ("ctf");
 }
@@ -1263,14 +1262,14 @@ ctf_start_symtab (ctf_psymtab *pst,
    the .text section number.  */
 
 static struct compunit_symtab *
-ctf_end_symtab (ctf_psymtab *pst,
-		CORE_ADDR end_addr, int section)
+ctf_end_compunit_symtab (ctf_psymtab *pst,
+			 CORE_ADDR end_addr, int section)
 {
   struct ctf_context *ccp;
 
   ccp = &pst->context;
   struct compunit_symtab *result
-    = ccp->builder->end_symtab (end_addr, section);
+    = ccp->builder->end_compunit_symtab (end_addr, section);
   delete ccp->builder;
   ccp->builder = nullptr;
   return result;
@@ -1398,7 +1397,7 @@ ctf_psymtab::read_symtab (struct objfile *objfile)
     {
       if (info_verbose)
 	{
-	  printf_filtered (_("Reading in CTF data for %s..."), filename);
+	  gdb_printf (_("Reading in CTF data for %s..."), filename);
 	  gdb_flush (gdb_stdout);
 	}
 
@@ -1407,17 +1406,17 @@ ctf_psymtab::read_symtab (struct objfile *objfile)
       int tsize;
 
       offset = get_objfile_text_range (objfile, &tsize);
-      ctf_start_symtab (this, objfile, offset);
+      ctf_start_compunit_symtab (this, objfile, offset);
       expand_psymtab (objfile);
 
       set_text_low (offset);
       set_text_high (offset + tsize);
-      compunit_symtab = ctf_end_symtab (this, offset + tsize,
-					SECT_OFF_TEXT (objfile));
+      compunit_symtab = ctf_end_compunit_symtab (this, offset + tsize,
+						 SECT_OFF_TEXT (objfile));
 
       /* Finish up the debug error message.  */
       if (info_verbose)
-	printf_filtered (_("done.\n"));
+	gdb_printf (_("done.\n"));
     }
 }
 
@@ -1449,6 +1448,7 @@ create_partial_symtab (const char *name,
   pst->context.of = objfile;
   pst->context.partial_symtabs = partial_symtabs;
   pst->context.pst = pst;
+  pst->context.builder = nullptr;
 
   return pst;
 }
@@ -1530,21 +1530,6 @@ ctf_psymtab_var_cb (const char *name, ctf_id_t id, void *arg)
   return 0;
 }
 
-/* Start a subfile for CTF. FNAME is the name of the archive.  */
-
-static void
-ctf_start_archive (struct ctf_context *ccx, struct objfile *of,
-		   const char *fname)
-{
-  if (ccx->builder == nullptr)
-    {
-      ccx->builder = new buildsym_compunit (of,
-		      of->original_name, nullptr, language_c, 0);
-      ccx->builder->record_debugformat ("ctf");
-    }
-  ccx->builder->start_subfile (fname);
-}
-
 /* Setup partial_symtab's describing each source file for which
    debugging information is available.  */
 
@@ -1557,7 +1542,7 @@ scan_partial_symbols (ctf_dict_t *cfp, psymtab_storage *partial_symtabs,
 
   if (strcmp (fname, ".ctf") == 0)
     {
-      fname = bfd_get_filename (of->obfd);
+      fname = bfd_get_filename (of->obfd.get ());
       isparent = true;
     }
 
@@ -1566,10 +1551,7 @@ scan_partial_symbols (ctf_dict_t *cfp, psymtab_storage *partial_symtabs,
 
   struct ctf_context *ccx = &pst->context;
   if (isparent == false)
-    {
-      ctf_start_archive (ccx, of, fname);
-      ccx->pst = pst;
-    }
+    ccx->pst = pst;
 
   if (ctf_type_iter (cfp, ctf_psymtab_type_cb, ccx) == CTF_ERR)
     complaint (_("ctf_type_iter scan_partial_symbols failed - %s"),
@@ -1601,7 +1583,7 @@ build_ctf_archive_member (ctf_dict_t *ctf, const char *name, void *arg)
 
   if (info_verbose)
     {
-      printf_filtered (_("Scanning archive member %s..."), name);
+      gdb_printf (_("Scanning archive member %s..."), name);
       gdb_flush (gdb_stdout);
     }
 
@@ -1619,7 +1601,7 @@ void
 elfctf_build_psymtabs (struct objfile *of)
 {
   struct ctf_per_tu_data pcu;
-  bfd *abfd = of->obfd;
+  bfd *abfd = of->obfd.get ();
   int err;
 
   ctf_archive_t *arc = ctf_bfdopen (abfd, &err);

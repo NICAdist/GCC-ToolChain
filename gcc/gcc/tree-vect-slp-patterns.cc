@@ -1,5 +1,5 @@
 /* SLP - Pattern matcher on SLP trees
-   Copyright (C) 2020-2022 Free Software Foundation, Inc.
+   Copyright (C) 2020-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -492,7 +492,7 @@ class complex_pattern : public vect_pattern
     }
 
   public:
-    void build (vec_info *);
+    void build (vec_info *) override;
 
     static internal_fn
     matches (complex_operation_t op, slp_tree_to_load_perm_map_t *, slp_tree *,
@@ -595,7 +595,7 @@ class complex_add_pattern : public complex_pattern
     }
 
   public:
-    void build (vec_info *);
+    void build (vec_info *) final override;
     static internal_fn
     matches (complex_operation_t op, slp_tree_to_load_perm_map_t *,
 	     slp_compat_nodes_map_t *, slp_tree *, vec<slp_tree> *);
@@ -977,7 +977,7 @@ class complex_mul_pattern : public complex_pattern
     }
 
   public:
-    void build (vec_info *);
+    void build (vec_info *) final override;
     static internal_fn
     matches (complex_operation_t op, slp_tree_to_load_perm_map_t *,
 	     slp_compat_nodes_map_t *, slp_tree *, vec<slp_tree> *);
@@ -1207,7 +1207,7 @@ class complex_fms_pattern : public complex_pattern
     }
 
   public:
-    void build (vec_info *);
+    void build (vec_info *) final override;
     static internal_fn
     matches (complex_operation_t op, slp_tree_to_load_perm_map_t *,
 	     slp_compat_nodes_map_t *, slp_tree *, vec<slp_tree> *);
@@ -1383,7 +1383,7 @@ class complex_operations_pattern : public complex_pattern
     }
 
   public:
-    void build (vec_info *);
+    void build (vec_info *) final override;
     static internal_fn
     matches (complex_operation_t op, slp_tree_to_load_perm_map_t *,
 	     slp_compat_nodes_map_t *, slp_tree *, vec<slp_tree> *);
@@ -1449,7 +1449,7 @@ class addsub_pattern : public vect_pattern
     addsub_pattern (slp_tree *node, internal_fn ifn)
 	: vect_pattern (node, NULL, ifn) {};
 
-    void build (vec_info *);
+    void build (vec_info *) final override;
 
     static vect_pattern*
     recognize (slp_tree_to_load_perm_map_t *, slp_compat_nodes_map_t *,
@@ -1644,4 +1644,4 @@ vect_pattern_decl_t slp_patterns[]
 #undef SLP_PATTERN
 
 /* Set the number of SLP pattern matchers available.  */
-size_t num__slp_patterns = sizeof(slp_patterns)/sizeof(vect_pattern_decl_t);
+size_t num__slp_patterns = ARRAY_SIZE (slp_patterns);

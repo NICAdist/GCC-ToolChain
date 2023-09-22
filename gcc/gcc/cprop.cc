@@ -1,5 +1,5 @@
 /* Global constant/copy propagation for RTL.
-   Copyright (C) 1997-2022 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -22,6 +22,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "coretypes.h"
 #include "backend.h"
 #include "rtl.h"
+#include "rtlanal.h"
 #include "cfghooks.h"
 #include "df.h"
 #include "insn-config.h"
@@ -795,7 +796,8 @@ try_replace_reg (rtx from, rtx to, rtx_insn *insn)
       /* If we've failed perform the replacement, have a single SET to
 	 a REG destination and don't yet have a note, add a REG_EQUAL note
 	 to not lose information.  */
-      if (!success && note == 0 && set != 0 && REG_P (SET_DEST (set)))
+      if (!success && note == 0 && set != 0 && REG_P (SET_DEST (set))
+	  && !contains_paradoxical_subreg_p (SET_SRC (set)))
 	note = set_unique_reg_note (insn, REG_EQUAL, copy_rtx (src));
     }
 
@@ -1956,15 +1958,18 @@ public:
   {}
 
   /* opt_pass methods: */
-  opt_pass * clone () { return new pass_rtl_cprop (m_ctxt); }
-  virtual bool gate (function *fun)
+  opt_pass * clone () final override { return new pass_rtl_cprop (m_ctxt); }
+  bool gate (function *fun) final override
     {
       return optimize > 0 && flag_gcse
 	&& !fun->calls_setjmp
 	&& dbg_cnt (cprop);
     }
 
-  virtual unsigned int execute (function *) { return execute_rtl_cprop (); }
+  unsigned int execute (function *) final override
+  {
+    return execute_rtl_cprop ();
+  }
 
 }; // class pass_rtl_cprop
 

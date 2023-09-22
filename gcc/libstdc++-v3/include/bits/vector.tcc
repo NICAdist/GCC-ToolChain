@@ -1,6 +1,6 @@
 // Vector implementation (out of line) -*- C++ -*-
 
-// Copyright (C) 2001-2022 Free Software Foundation, Inc.
+// Copyright (C) 2001-2023 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -139,26 +139,32 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
     {
       const size_type __n = __position - begin();
       if (this->_M_impl._M_finish != this->_M_impl._M_end_of_storage)
-	if (__position == end())
-	  {
-	    _GLIBCXX_ASAN_ANNOTATE_GROW(1);
-	    _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish,
-				     __x);
-	    ++this->_M_impl._M_finish;
-	    _GLIBCXX_ASAN_ANNOTATE_GREW(1);
-	  }
-	else
-	  {
+	{
+	  __glibcxx_assert(__position != const_iterator());
+	  if (!(__position != const_iterator()))
+	    __builtin_unreachable(); // PR 106434
+
+	  if (__position == end())
+	    {
+	      _GLIBCXX_ASAN_ANNOTATE_GROW(1);
+	      _Alloc_traits::construct(this->_M_impl, this->_M_impl._M_finish,
+				       __x);
+	      ++this->_M_impl._M_finish;
+	      _GLIBCXX_ASAN_ANNOTATE_GREW(1);
+	    }
+	  else
+	    {
 #if __cplusplus >= 201103L
-	    const auto __pos = begin() + (__position - cbegin());
-	    // __x could be an existing element of this vector, so make a
-	    // copy of it before _M_insert_aux moves elements around.
-	    _Temporary_value __x_copy(this, __x);
-	    _M_insert_aux(__pos, std::move(__x_copy._M_val()));
+	      const auto __pos = begin() + (__position - cbegin());
+	      // __x could be an existing element of this vector, so make a
+	      // copy of it before _M_insert_aux moves elements around.
+	      _Temporary_value __x_copy(this, __x);
+	      _M_insert_aux(__pos, std::move(__x_copy._M_val()));
 #else
-	    _M_insert_aux(__position, __x);
+	      _M_insert_aux(__position, __x);
 #endif
-	  }
+	    }
+	}
       else
 #if __cplusplus >= 201103L
 	_M_realloc_insert(begin() + (__position - cbegin()), __x);

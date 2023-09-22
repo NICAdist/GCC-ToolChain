@@ -1,6 +1,6 @@
 /* Trace file TFILE format support in GDB.
 
-   Copyright (C) 1997-2022 Free Software Foundation, Inc.
+   Copyright (C) 1997-2023 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -471,7 +471,7 @@ tfile_target_open (const char *arg, int from_tty)
 
   gdb::unique_xmalloc_ptr<char> filename (tilde_expand (arg));
   if (!IS_ABSOLUTE_PATH (filename.get ()))
-    filename = gdb_abspath (filename.get ());
+    filename = make_unique_xstrdup (gdb_abspath (filename.get ()).c_str ());
 
   flags = O_BINARY | O_LARGEFILE;
   flags |= O_RDONLY;
@@ -634,7 +634,7 @@ tfile_target::close ()
 void
 tfile_target::files_info ()
 {
-  printf_filtered ("\t`%s'\n", trace_filename);
+  gdb_printf ("\t`%s'\n", trace_filename);
 }
 
 void
@@ -752,7 +752,7 @@ tfile_target::trace_find (enum trace_find_type type, int num,
 		    found = 1;
 		  break;
 		default:
-		  internal_error (__FILE__, __LINE__, _("unknown tfind type"));
+		  internal_error (_("unknown tfind type"));
 		}
 	    }
 	}
