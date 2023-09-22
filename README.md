@@ -1,6 +1,7 @@
 # GCC-ToolChain
-Set of GCC related tools, similar to https://github.com/alisw/gcc-toolchain/ but containing (only) GCC 12.3.
-Also autoconf-archive has been removed (moved to the project autotools since it is more proper place).
+Set of GCC related tools, similar to https://github.com/alisw/gcc-toolchain/ but containing different
+versions of GCC, currently GCC 13.2 and 12.3. Also autoconf-archive has been removed (moved to the
+project autotools since it is more proper place).
 
 # This branch contains following versions of packages
 | Package | Version |
