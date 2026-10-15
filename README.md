@@ -8,8 +8,8 @@ autotools since it is more proper place).
 | Package | Version |
 |---|---|
 |binutils|v2.47|
-|gcc|v14.4.0|
-|gdb|v17.2|
+|gcc|v16.2.0|
+|gdb|v18.1|
 |gmp|6.3.0|
 |isl|0.24|
 |mpc|1.4.1|
